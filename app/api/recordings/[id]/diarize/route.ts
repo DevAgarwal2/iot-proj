@@ -6,7 +6,7 @@ interface RouteParams {
   params: Promise<{ id: string }>;
 }
 
-const API_KEY = process.env.SARVAM_API_KEY || "YOUR_SARVAM_API_KEY_HERE";
+const API_KEY = process.env.SARVAM_API_KEY || "";
 
 // Speaker colors for UI
 const SPEAKER_COLORS = [

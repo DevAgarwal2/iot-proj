@@ -81,7 +81,7 @@ const TranscriptionContext = createContext<TranscriptionContextType | null>(
   null
 );
 
-const API_KEY = "YOUR_SARVAM_API_KEY_HERE";
+const API_KEY = process.env.NEXT_PUBLIC_SARVAM_API_KEY || "";
 
 export function TranscriptionProvider({ children }: { children: ReactNode }) {
   // Recording state
