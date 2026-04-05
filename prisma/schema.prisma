@@ -1,0 +1,85 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// A recording represents a single lecture/class session
+model Recording {
+  id        String   @id @default(cuid())
+  title     String   // Lecture title (e.g., "Neural Networks Lecture 5")
+  date      DateTime @default(now()) // When the recording was made
+  duration  Int      @default(0) // Duration in seconds
+  status    String   @default("recording") // recording, processing, completed, failed
+  audioPath String?  // Path to stored audio file for reprocessing
+
+  // Relations
+  segments  TranscriptSegment[]
+  speakers  Speaker[]
+  insights  Insights?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([date])
+}
+
+// Individual transcript segments with speaker identification
+model TranscriptSegment {
+  id           String   @id @default(cuid())
+  text         String
+  timestamp    DateTime // When this segment was spoken
+  startTime    Float    @default(0) // Start time in seconds from recording start
+  endTime      Float    @default(0) // End time in seconds from recording start
+  languageCode String   @default("en-IN")
+  confidence   Float?   // Transcription confidence score
+
+  // Relations
+  recording   Recording @relation(fields: [recordingId], references: [id], onDelete: Cascade)
+  recordingId String
+  speaker     Speaker?  @relation(fields: [speakerId], references: [id])
+  speakerId   String?
+
+  createdAt DateTime @default(now())
+
+  @@index([recordingId])
+  @@index([speakerId])
+}
+
+// Speaker identification for diarization
+model Speaker {
+  id       String  @id @default(cuid())
+  label    String  // e.g., "SPEAKER_00", "SPEAKER_01"
+  name     String? // Optional custom name (e.g., "Professor", "Student 1")
+  color    String  // Color for UI display (e.g., "#3b82f6")
+
+  // Relations
+  recording   Recording @relation(fields: [recordingId], references: [id], onDelete: Cascade)
+  recordingId String
+  segments    TranscriptSegment[]
+
+  @@unique([recordingId, label])
+  @@index([recordingId])
+}
+
+// AI-generated insights for a recording
+model Insights {
+  id        String @id @default(cuid())
+  summary   String // AI-generated summary
+  keyPoints String // JSON array of key points
+  topics    String // JSON array of topics
+  wordCount Int    @default(0)
+
+  // Relations
+  recording   Recording @relation(fields: [recordingId], references: [id], onDelete: Cascade)
+  recordingId String    @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
