@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Lecture Notes — Project Report</title>
+<style>
+  @page { size: A4; margin: 20mm 18mm; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Helvetica Neue", Arial, sans-serif;
+    font-size: 11pt; line-height: 1.5; color: #1a1a1a; margin: 0;
+  }
+  h1 { font-size: 18pt; color: #111; margin: 22pt 0 6pt; page-break-before: auto; page-break-after: avoid; }
+  h1.first { margin-top: 0; }
+  h2 { font-size: 13pt; color: #222; margin: 16pt 0 6pt; page-break-after: avoid; }
+  h3 { font-size: 11.5pt; color: #333; margin: 12pt 0 4pt; }
+  p { margin: 6pt 0; text-align: justify; }
+  ul, ol { margin: 6pt 0 6pt 18pt; }
+  li { margin: 2pt 0; }
+  code { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 9.5pt; background: #f4f4f4; padding: 1px 4px; border-radius: 3px; }
+  pre { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 8.5pt; line-height: 1.35; background: #f7f7f8; border: 1px solid #e5e5e5; border-radius: 5px; padding: 10px 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  table { width: 100%; border-collapse: collapse; margin: 10pt 0; font-size: 10pt; }
+  th, td { border: 1px solid #dcdcdc; padding: 5pt 7pt; text-align: left; vertical-align: top; }
+  th { background: #f2f2f3; font-weight: 600; }
+  .cover { height: 85vh; display: flex; flex-direction: column; justify-content: center; page-break-after: always; }
+  .cover h1 { font-size: 30pt; page-break-before: avoid; margin-bottom: 4pt; }
+  .cover .sub { font-size: 14pt; color: #555; margin-bottom: 40pt; }
+  .cover .meta { font-size: 11pt; color: #444; line-height: 1.9; }
+  .tag { display: inline-block; border: 1px solid #ddd; border-radius: 20px; padding: 2pt 10pt; margin: 2pt 4pt 2pt 0; font-size: 9.5pt; color: #444; }
+  .toc { page-break-after: always; }
+  .toc ol { list-style: none; margin-left: 0; }
+  .toc li { margin: 5pt 0; font-size: 11pt; }
+  .muted { color: #666; font-size: 10pt; }
+  .kpi { display: flex; gap: 10pt; margin: 10pt 0; }
+  .kpi div { flex: 1; border: 1px solid #e5e5e5; border-radius: 6px; padding: 8pt; text-align: center; }
+  .kpi .n { font-size: 16pt; font-weight: 700; color: #b45309; }
+  .kpi .l { font-size: 8.5pt; color: #666; text-transform: uppercase; letter-spacing: .04em; }
+  footer { position: running(f); }
+</style>
+</head>
+<body>
+
+<!-- ===================== COVER ===================== -->
+<section class="cover">
+  <div style="font-size:10pt;color:#b45309;letter-spacing:.18em;text-transform:uppercase;">Project Report</div>
+  <h1>Lecture Notes</h1>
+  <div class="sub">Real-time AI transcription, speaker diarization &amp; insights — deployed on AWS</div>
+  <div class="meta">
+    <strong>Author:</strong> Dev Agarwal<br/>
+    <strong>Programme:</strong> MCA, Nirma University<br/>
+    <strong>Date:</strong> October 2026<br/>
+    <strong>Stack:</strong> Next.js · Mistral Voxtral · PostgreSQL · AWS<br/>
+  </div>
+  <div style="margin-top:34pt;">
+    <span class="tag">Next.js 16</span><span class="tag">React 19</span><span class="tag">TypeScript</span>
+    <span class="tag">Prisma</span><span class="tag">Mistral Voxtral</span><span class="tag">Amazon RDS</span>
+    <span class="tag">Amazon S3</span><span class="tag">AWS Lambda</span><span class="tag">Amazon SQS</span>
+  </div>
+</section>
+
+<!-- ===================== TOC ===================== -->
+<section class="toc">
+  <h1 class="first">Contents</h1>
+  <ol>
+    <li>1. Introduction and Objectives</li>
+    <li>2. System Overview and Architecture</li>
+    <li>3. Technology Stack</li>
+    <li>4. Data Model</li>
+    <li>5. The AI Pipeline (Mistral Voxtral)</li>
+    <li>6. End-Word Line Control</li>
+    <li>7. Cloud Architecture on AWS</li>
+    <li>8. Security and Configuration</li>
+    <li>9. Testing and Quality Assurance</li>
+    <li>10. Results and Measurements</li>
+    <li>11. Limitations and Future Work</li>
+    <li>12. Conclusion</li>
+  </ol>
+</section>
+
+<!-- ===================== 1 ===================== -->
+<h1>1. Introduction and Objectives</h1>
+<p>Lecture Notes is a web application that lets a professor record a lecture and
+have it turned into an organised, searchable set of notes. The application
+captures audio from the browser microphone, transcribes it live on screen, and —
+once the recording stops — produces a speaker-labelled transcript together with
+AI-generated insights (a short summary, key points, and topic tags). Recordings
+are organised on a calendar and can be searched by title.</p>
+<p>The project was built to explore a complete, production-shaped pipeline: a
+modern full-stack web application, a hosted speech-to-text and summarisation
+layer, and a cloud deployment on AWS with object storage, a managed database,
+secret management, and an asynchronous worker.</p>
+
+<h2>1.1 Objectives</h2>
+<ul>
+  <li>Capture lecture audio in the browser and transcribe it in real time.</li>
+  <li>Produce a final, high-quality transcript with speaker diarization.</li>
+  <li>Group transcript lines under the speaker's control using configurable
+      <em>end words</em> rather than fixed time intervals.</li>
+  <li>Generate a summary, key points, and topics from the transcript.</li>
+  <li>Persist recordings, transcripts, speakers, and insights durably.</li>
+  <li>Deploy on AWS with S3, RDS, Secrets Manager, SQS and Lambda — and keep the
+      provider API key strictly server-side.</li>
+  <li>Back the system with automated unit, API, and browser end-to-end tests.</li>
+</ul>
+
+<h2>1.2 Scope</h2>
+<p>The deliverable is a single Next.js application containing both the user
+interface and the server (API routes), backed by PostgreSQL, with recorded audio
+stored in Amazon S3 and processed through a Mistral Voxtral model family for
+speech-to-text and Mistral Small for summarisation. The application is
+containerised and runs on AWS EC2 (with an SQS-triggered Lambda worker), and the
+infrastructure is described as code.</p>
+
+<!-- ===================== 2 ===================== -->
+<h1>2. System Overview and Architecture</h1>
+<p>The application follows a conventional three-tier layout — a React client, a
+Next.js server, and a PostgreSQL database — augmented by two external AI
+services and a set of AWS managed services. The browser talks directly to
+Mistral's realtime endpoint for live transcription (using a short-lived token),
+while all privileged operations happen on the server.</p>
+
+<pre>
+ Browser (React)                         Next.js server (Node)
+ ┌────────────────────────┐             ┌─────────────────────────────┐
+ │ Record page            │  POST       │ /api/realtime/session        │
+ │  • mic capture         │────────────▶│   mints rt_* token           │
+ │  • live transcript     │             │ /api/recordings/[id]/diarize │
+ │  • end-word grouping   │  WSS        │   batch STT + diarization    │
+ │                        │═══════════▶ │ /api/recordings/[id]/process │───┐
+ └────────────────────────┘  (audio)    │ /api/settings/end-words      │   │
+         ▲                               └───────────────┬─────────────┘   │
+         │  live text                                    │                 │
+         │                                               ▼                 ▼
+   Mistral Voxtral Realtime                 Prisma → PostgreSQL      S3 (audio)
+   (voxtral-mini-transcribe-realtime)       (Amazon RDS)             Secrets Manager
+         ▲                                                                │
+         │  batch STT + diarization + insights                           │
+   Mistral (voxtral-mini-latest, mistral-small-latest)         SQS ──▶ Lambda ──▶ /process
+</pre>
+
+<h2>2.1 Primary User Flows</h2>
+<ol>
+  <li><strong>Record.</strong> The user opens <code>/dashboard/record</code>,
+      optionally names the lecture, and starts recording. The browser requests
+      microphone access, opens a WebSocket to Mistral, and streams 16-bit PCM.</li>
+  <li><strong>Live transcription.</strong> Word-level text deltas arrive over the
+      socket and are accumulated into the current line. When an end word is heard
+      (or a periodic fallback fires), the line is committed.</li>
+  <li><strong>Finalisation.</strong> On stop, the full audio is sent to the server,
+      which re-transcribes it with diarization, re-groups it into end-word lines,
+      assigns speakers, stores the audio in S3, and returns the finished recording.</li>
+  <li><strong>Insights.</strong> The transcript is summarised by an LLM and the
+      resulting summary, key points and topics are stored.</li>
+  <li><strong>Review.</strong> The transcript and insights pages display the
+      recording; audio can be played back through a presigned S3 URL.</li>
+</ol>
+
+<!-- ===================== 3 ===================== -->
+<h1>3. Technology Stack</h1>
+<table>
+  <thead><tr><th>Layer</th><th>Technology</th><th>Notes</th></tr></thead>
+  <tbody>
+    <tr><td>Framework</td><td>Next.js 16 (App Router, Turbopack)</td><td>Server + client in one codebase</td></tr>
+    <tr><td>UI</td><td>React 19, TypeScript</td><td>Typed components and hooks</td></tr>
+    <tr><td>Styling</td><td>Tailwind CSS v4, shadcn/ui, lucide-react, framer-motion</td><td>Minimal, monochrome design</td></tr>
+    <tr><td>Data access</td><td>Prisma ORM + <code>@prisma/adapter-pg</code></td><td>Type-safe queries</td></tr>
+    <tr><td>Database</td><td>PostgreSQL (Amazon RDS)</td><td>Driver-adapter based client</td></tr>
+    <tr><td>Speech-to-text</td><td>Mistral Voxtral</td><td>Realtime + batch with diarization</td></tr>
+    <tr><td>Summarisation</td><td>Mistral Small</td><td>Streamed chat completion</td></tr>
+    <tr><td>Object storage</td><td>Amazon S3</td><td>Recorded audio, presigned reads</td></tr>
+    <tr><td>Secrets</td><td>AWS Secrets Manager</td><td>Mistral key, database URL</td></tr>
+    <tr><td>Async worker</td><td>Amazon SQS + AWS Lambda</td><td>Decoupled processing</td></tr>
+    <tr><td>Compute</td><td>AWS EC2 (container via ECR)</td><td>Next.js standalone image</td></tr>
+    <tr><td>Runtime / tooling</td><td>Bun, Docker, Playwright</td><td>Install, image, E2E tests</td></tr>
+  </tbody>
+</table>
+
+<!-- ===================== 4 ===================== -->
+<h1>4. Data Model</h1>
+<p>Persistence uses Prisma with five models. A recording owns its transcript
+segments, its speakers, and a single insights row; deleting a recording cascades
+to all of them. Configured end words are stored in a small global table.</p>
+<table>
+  <thead><tr><th>Model</th><th>Key fields</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Recording</strong></td><td>id, title, date, duration, status, audioPath</td><td>A lecture session</td></tr>
+    <tr><td><strong>TranscriptSegment</strong></td><td>text, timestamp, startTime, endTime, languageCode, speakerId</td><td>One transcript line</td></tr>
+    <tr><td><strong>Speaker</strong></td><td>label, name, color</td><td>Diarized speaker</td></tr>
+    <tr><td><strong>Insights</strong></td><td>summary, keyPoints, topics, wordCount</td><td>AI-generated notes</td></tr>
+    <tr><td><strong>EndWord</strong></td><td>word (unique)</td><td>Line-end trigger words</td></tr>
+  </tbody>
+</table>
+<pre>
+Recording 1──* TranscriptSegment *──1 Speaker        (speaker optional)
+Recording 1──1 Insights
+EndWord   (global list, no relation)
+</pre>
+<p class="muted">Relations use <code>onDelete: Cascade</code> from Recording, so
+removing a lecture cleans up its segments and speakers automatically. Indexes on
+<code>recordingId</code>, <code>speakerId</code>, and <code>date</code> keep the
+list and detail queries fast.</p>
+
+<!-- ===================== 5 ===================== -->
+<h1>5. The AI Pipeline (Mistral Voxtral)</h1>
+<p>Three models are used, each chosen for a specific role.</p>
+<table>
+  <thead><tr><th>Role</th><th>Model</th><th>Endpoint</th></tr></thead>
+  <tbody>
+    <tr><td>Live transcription</td><td><code>voxtral-mini-transcribe-realtime-2602</code></td><td>WebSocket</td></tr>
+    <tr><td>Batch transcription + diarization</td><td><code>voxtral-mini-latest</code></td><td><code>POST /v1/audio/transcriptions</code></td></tr>
+    <tr><td>Summarisation / insights</td><td><code>mistral-small-latest</code></td><td><code>POST /v1/chat/completions</code> (streamed)</td></tr>
+  </tbody>
+</table>
+
+<h2>5.1 Live Transcription</h2>
+<p>Because browsers cannot store a long-lived API key or set authentication
+headers on a WebSocket, the server mints a short-lived <code>rt_*</code> token
+scoped to the realtime model. The browser opens the socket using the token as a
+sub-protocol, then streams base64-encoded 16-bit PCM at 16&nbsp;kHz. The server
+never exposes the raw key to the client.</p>
+
+<h2>5.2 Batch Diarization</h2>
+<p>When recording stops, the accumulated screenshot-quality audio is sent to the
+server and re-transcribed with <code>diarize: true</code> and segment-level
+timestamps. This yields segments that carry a speaker id and time range, which
+are mapped to stored speakers. The result replaces the live (lower-quality)
+segments.</p>
+
+<h2>5.3 Insights</h2>
+<p>The final transcript is streamed to Mistral Small with a strict instruction to
+return JSON containing a summary, key points, and topics. The server streams the
+model output back to the browser, so the summary appears progressively, and the
+parsed result is persisted.</p>
+
+<!-- ===================== 6 ===================== -->
+<h1>6. End-Word Line Control</h1>
+<p>By default, the live transcript commits a line every few seconds, producing a
+new line for almost every sentence. The application instead lets the professor
+control line breaks with <strong>end words</strong>: a line is finalised only
+when one of the configured words or phrases is spoken, and everything said
+in between accumulates into the current line.</p>
+
+<h3>Behaviour</h3>
+<ul>
+  <li>End words are managed on a dedicated <strong>Settings</strong> page
+      (add / remove, stored in the database).</li>
+  <li>Matching is case-insensitive and whole-word (so <code>done</code> does not
+      match inside <code>abandoned</code>); multi-word phrases are supported.</li>
+  <li>The trigger word is treated as a command and removed from the transcript;
+      text after it begins the next line.</li>
+  <li>The same rule is applied to the final diarized transcript, so stored line
+      breaks and speaker labels share one source of truth.</li>
+  <li>With no end words configured, the application falls back to the previous
+      periodic behaviour, so nothing regresses.</li>
+</ul>
+<pre>
+Spoken:   "...we finished the topic done let us move on..."
+Line 1:   "...we finished the topic"
+Line 2:   "let us move on..."   (continues until the next end word)
+</pre>
+
+<!-- ===================== 7 ===================== -->
+<h1>7. Cloud Architecture on AWS</h1>
+<p>The application is deployed on AWS. The table lists the services and their
+role; the diagram shows how they connect.</p>
+<table>
+  <thead><tr><th>AWS service</th><th>Role in this project</th></tr></thead>
+  <tbody>
+    <tr><td>Amazon EC2 (t4g.small)</td><td>Runs the containerised Next.js app behind port 80</td></tr>
+    <tr><td>Amazon ECR</td><td>Stores the Docker image of the app</td></tr>
+    <tr><td>Amazon RDS for PostgreSQL</td><td>Managed database for Prisma</td></tr>
+    <tr><td>Amazon S3</td><td>Stores recorded audio; playback via presigned URLs</td></tr>
+    <tr><td>AWS Secrets Manager</td><td>Holds the Mistral API key and the database URL</td></tr>
+    <tr><td>Amazon SQS</td><td>Queue of recordings awaiting processing</td></tr>
+    <tr><td>AWS Lambda</td><td>Worker that consumes the queue and triggers processing</td></tr>
+    <tr><td>Amazon CloudWatch</td><td>Logs for the Lambda worker</td></tr>
+    <tr><td>IAM (LabRole / LabInstanceProfile)</td><td>Instance and Lambda permissions</td></tr>
+  </tbody>
+</table>
+<pre>
+   [ Browser ]
+        │ HTTP → EC2 (Docker: Next.js)  ── Prisma ──▶ RDS PostgreSQL
+        │                                   │
+        │                                   ├── S3 (audio, presigned GET)
+        │                                   └── Secrets Manager (Mistral key)
+        │
+        └─ WSS ─▶ Mistral Voxtral Realtime
+
+   [ processing ]  client → SQS → Lambda → POST /api/recordings/{id}/process
+</pre>
+<h2>7.1 Deployment</h2>
+<p>The app is built into a self-contained Next.js “standalone” server and shipped
+as a Docker image to ECR. An EC2 instance pulls the image and runs it; the
+instance profile supplies temporary credentials so the app can read S3 and
+Secrets Manager without any static keys. Because the lab account denies
+<code>iam:CreateRole</code> (which App Runner and Fargate require), EC2 with the
+pre-existing instance profile is used as the compute tier. A reference SST
+configuration and a reproducible provisioning script accompany the code.</p>
+
+<!-- ===================== 8 ===================== -->
+<h1>8. Security and Configuration</h1>
+<ul>
+  <li><strong>No API key in the browser.</strong> The Mistral key is read only on
+      the server, from Secrets Manager in the cloud and from the environment
+      locally. The client receives short-lived realtime tokens instead.</li>
+  <li><strong>Least privilege:</strong> the instance role is scoped to the two
+      secrets, the audio bucket, and the queue.</li>
+  <li><strong>Audio access:</strong> S3 objects are private; playback uses
+      time-limited presigned URLs.</li>
+  <li><strong>Worker authentication:</strong> the async processing endpoint
+      requires a shared secret header, so only the Lambda can trigger it.</li>
+  <li><strong>Transport:</strong> database connections use TLS; credentials and
+      secrets are never committed to the repository.</li>
+</ul>
+<p class="muted">Environment variables: <code>DATABASE_URL</code>,
+<code>AUDIO_BUCKET</code>, <code>AWS_REGION</code>,
+<code>MISTRAL_SECRET_ARN</code>, optional <code>SQS_QUEUE_URL</code> and
+<code>PROCESS_SECRET</code>.</p>
+
+<!-- ===================== 9 ===================== -->
+<h1>9. Testing and Quality Assurance</h1>
+<p>The project is backed by an automated test suite of <strong>38 tests</strong>
+across three layers, run with Bun’s test runner. The API and end-to-end suites
+run against the real application, database, object store, and AI services.</p>
+<table>
+  <thead><tr><th>Suite</th><th>What it covers</th><th>Tests</th></tr></thead>
+  <tbody>
+    <tr><td>Unit</td><td>Audio/WAV/base64 helpers, language normalisation, Mistral client, end-word split/group</td><td>13</td></tr>
+    <tr><td>API</td><td>Recordings CRUD, segments/speakers, end-word config, realtime token mint, diarization, insights, realtime WebSocket protocol</td><td>24</td></tr>
+    <tr><td>E2E (browser)</td><td>Headless Chromium with a fake microphone: record → live transcript → stop → diarization + insights → transcript page</td><td>1</td></tr>
+  </tbody>
+</table>
+<p>Static analysis and builds are also part of the pipeline: ESLint runs with the
+Next.js ruleset (no errors or warnings), and the production build
+(<code>next build</code>) type-checks the entire project, including the tests.
+The browser suite uses a generated speech fixture played as the microphone input,
+so it exercises the real recording path deterministically.</p>
+
+<!-- ===================== 10 ===================== -->
+<h1>10. Results and Measurements</h1>
+<p>The application runs end to end on AWS and was verified against the live
+deployed instance: realtime token minting via Secrets Manager, transcription with
+diarization, audio persistence to S3 with presigned playback, and the
+SQS&nbsp;→&nbsp;Lambda pipeline (CloudWatch recorded a successful processing run).
+All 38 tests pass against the cloud database and object store.</p>
+
+<h2>10.1 Transcription Length Probe</h2>
+<p>A measurement script pushed progressively longer audio through the batch
+endpoint to observe behaviour and limits. Results (single speaker, no rate limit
+encountered):</p>
+<table>
+  <thead><tr><th>Audio length</th><th>Status</th><th>Latency</th><th>Tokens</th></tr></thead>
+  <tbody>
+    <tr><td>1 minute</td><td>200 OK</td><td>~63 s</td><td>15,634</td></tr>
+    <tr><td>5 minutes</td><td>200 OK</td><td>~67 s</td><td>30,937</td></tr>
+    <tr><td>15 minutes</td><td>200 OK</td><td>~83 s</td><td>137,646</td></tr>
+    <tr><td>30 minutes</td><td>in progress (upload-bound)</td><td>—</td><td>—</td></tr>
+  </tbody>
+</table>
+<p class="muted">The provider documents a per-request limit of up to three hours
+for batch transcription; the probe confirmed multi-minute requests succeed with
+sub-linear latency growth.</p>
+
+<!-- ===================== 11 ===================== -->
+<h1>11. Limitations and Future Work</h1>
+<ul>
+  <li><strong>Compute tier.</strong> App Runner / ECS Fargate were blocked by the
+      lab’s IAM policy; a full account would host the container behind a load
+      balancer with TLS and a custom domain.</li>
+  <li><strong>Async wiring.</strong> The SQS + Lambda pipeline and the
+      <code>/process</code> endpoint exist and are verified; the recorder still
+      commits the final transcript synchronously. Switching the client to enqueue
+      work is a small, isolated change.</li>
+  <li><strong>Authentication.</strong> The app currently has no user accounts;
+      Cognito would add per-user recordings and sharing.</li>
+  <li><strong>Search.</strong> Only title search exists; embeddings and a vector
+      store would enable semantic search across lectures.</li>
+  <li><strong>Citation of the provider.</strong> Transcription is billed per
+      minute and summarisation per token; a cost dashboard would help tune the
+      length of batch jobs.</li>
+</ul>
+
+<!-- ===================== 12 ===================== -->
+<h1>12. Conclusion</h1>
+<p>Lecture Notes demonstrates a complete, cloud-native voice-notes application.
+It captures lecture audio in the browser, transcribes it live and again with
+speaker diarization, lets the speaker control transcript line breaks with
+configurable end words, and generates a summary with key points and topics. The
+system is deployed on AWS using S3, RDS, Secrets Manager, SQS and Lambda, with
+the AI provider key kept strictly server-side and the audio secured behind
+presigned URLs. A 38-test suite — unit, API, and real browser end-to-end — keeps
+the pipeline honest. The result is a practical, well-tested foundation that
+extends naturally towards authentication, richer search, and a fully
+load-balanced production deployment.</p>
+
+<h2>Appendix — API Routes</h2>
+<table>
+  <thead><tr><th>Method &amp; path</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td><code>POST /api/realtime/session</code></td><td>Mint a short-lived Voxtral realtime token</td></tr>
+    <tr><td><code>GET/POST /api/recordings</code></td><td>List / create recordings</td></tr>
+    <tr><td><code>GET/PATCH/DELETE /api/recordings/[id]</code></td><td>Read / update / delete a recording</td></tr>
+    <tr><td><code>POST /api/recordings/[id]/diarize</code></td><td>Transcribe uploaded audio with diarization</td></tr>
+    <tr><td><code>POST /api/recordings/[id]/process</code></td><td>Async processing from stored audio (Lambda)</td></tr>
+    <tr><td><code>GET /api/recordings/[id]/audio</code></td><td>Presigned S3 redirect for playback</td></tr>
+    <tr><td><code>POST/GET /api/recordings/[id]/insights</code></td><td>Generate / read insights</td></tr>
+    <tr><td><code>POST /api/recordings/[id]/speakers</code></td><td>Manage speakers</td></tr>
+    <tr><td><code>POST /api/recordings/[id]/segments</code></td><td>Persist transcript segments</td></tr>
+    <tr><td><code>GET /api/recordings/by-date</code></td><td>Group recordings for the calendar</td></tr>
+    <tr><td><code>GET/POST/DELETE /api/settings/end-words</code></td><td>Manage end words</td></tr>
+  </tbody>
+</table>
+
+</body>
+</html>

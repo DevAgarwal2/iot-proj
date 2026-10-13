@@ -1,119 +1,215 @@
 # Lecture Notes App
 
-A voice transcription application for professors to record and organize lecture notes. Built with Next.js 16, Sarvam AI, and SQLite.
+A voice transcription application for professors to record and organise lecture
+notes. It captures lecture audio in the browser, transcribes it **live**, then
+produces a **speaker-labelled transcript** and AI-generated **insights**
+(summary, key points, topics). Built with Next.js 16, Mistral AI (Voxtral) and
+PostgreSQL, and deployable to AWS.
 
 ## Features
 
-- **Real-time Recording**: Capture audio with live transcription
-- **Multi-language Support**: Supports English, Hindi, Bengali, Tamil, Telugu, Gujarati, Kannada, Malayalam, Marathi, Punjabi, and Odia
-- **Calendar Organization**: View and filter recordings by date
-- **Search**: Find recordings by title
-- **Transcript Management**: View, edit, copy, and download transcripts
-- **AI Insights**: Automatic summary, key points, and topic extraction
-- **SQLite Database**: Persistent storage with Prisma ORM
+- **Real-time recording** with live transcription via Voxtral Realtime
+- **Speaker diarization** — a second Voxtral pass labels who said what
+- **End words** — control transcript line breaks: a line ends only when the
+  speaker says a configured word ("done", "next question", …)
+- **AI insights** — summary, key points and topics per recording
+- **Calendar + search** — organise recordings by date and title
+- **Transcript tools** — view, edit, copy and export
+- **Cloud-ready** — recorded audio in Amazon S3 (presigned playback), data in
+  Amazon RDS, secrets in AWS Secrets Manager, async processing via SQS + Lambda
 
 ## Tech Stack
 
-- **Framework**: Next.js 16 with App Router
-- **Language**: TypeScript
-- **Styling**: Tailwind CSS
-- **UI Components**: shadcn/ui
-- **Database**: SQLite with Prisma
-- **AI**: Sarvam AI for speech-to-text and insights
-- **Package Manager**: Bun
+| Layer | Technology |
+| --- | --- |
+| Framework | Next.js 16 (App Router, Turbopack), React 19, TypeScript |
+| Styling / UI | Tailwind CSS v4, shadcn/ui, lucide-react, framer-motion |
+| Data | Prisma ORM + `@prisma/adapter-pg` → PostgreSQL (Amazon RDS) |
+| AI | Mistral AI — Voxtral (speech-to-text), Mistral Small (insights) |
+| Cloud | Amazon S3, RDS, Secrets Manager, SQS, Lambda, ECR, EC2 |
+| Tooling | Bun, Docker, Playwright |
+
+## Models
+
+Defined in `lib/mistral.ts` (see the [Mistral audio docs](https://docs.mistral.ai/capabilities/audio/)).
+
+| Purpose | Model |
+| --- | --- |
+| Live streaming transcription | `voxtral-mini-transcribe-realtime-2602` |
+| Batch transcription + speaker diarization | `voxtral-mini-latest` |
+| Insights / summaries | `mistral-small-latest` |
+
+The API key is used **only on the server**. The browser receives short-lived
+realtime tokens minted via `/api/realtime/session`, so the key is never exposed
+to the client.
 
 ## Getting Started
 
 ### Prerequisites
 
-- Node.js 18+ and Bun
-- Sarvam AI API key ([Get one here](https://www.sarvam.ai/))
+- Node.js 18+ and **Bun**
+- **PostgreSQL** (local or Amazon RDS)
+- A Mistral AI API key ([console.mistral.ai](https://console.mistral.ai/))
 
 ### Installation
 
-1. Clone the repository:
 ```bash
 git clone https://github.com/DevAgarwal2/iot-proj.git
 cd iot-proj
-```
-
-2. Install dependencies:
-```bash
 bun install
 ```
 
-3. Set up environment variables:
-```bash
-cp .env.local.example .env.local
-```
-Edit `.env.local` and add your Sarvam AI API key.
+Start a local PostgreSQL (or point `DATABASE_URL` at RDS):
 
-4. Set up the database:
 ```bash
-bunx prisma migrate dev
+docker run -d --name lecture-pg \
+  -e POSTGRES_USER=lecture -e POSTGRES_PASSWORD=lecture -e POSTGRES_DB=lecturenotes \
+  -p 5432:5432 postgres:16
 ```
 
-5. Run the development server:
+Configure the environment and database:
+
 ```bash
-bun run dev
+cp .env.local.example .env.local     # then edit it
+bun x prisma migrate dev             # create the schema
+bun run dev                          # http://localhost:3000
 ```
 
-6. Open [http://localhost:3000](http://localhost:3000) in your browser.
+> Recording requires a **secure context** — `http://localhost` works in dev, and
+> a deployment must be served over HTTPS for microphone access to be allowed.
 
 ## Environment Variables
 
-Create a `.env.local` file with the following variables:
+`.env.local` (see `.env.local.example`):
 
 ```env
-# Sarvam AI API Key
-# Get your API key from: https://www.sarvam.ai/
-SARVAM_API_KEY=your_sarvam_api_key_here
-NEXT_PUBLIC_SARVAM_API_KEY=your_sarvam_api_key_here
+# Database
+DATABASE_URL="postgresql://user:pass@host:5432/lecturenotes?sslmode=require"
+
+# Mistral API key (local dev; omit on AWS to use Secrets Manager)
+MISTRAL_API_KEY=your_mistral_api_key_here
+
+# AWS (optional / deployment)
+AWS_REGION=us-west-2
+AUDIO_BUCKET=your-audio-bucket
+MISTRAL_SECRET_ARN=arn:aws:secretsmanager:...:secret:lecture-notes/mistral-api-key-xxxxxx
+SQS_QUEUE_URL=https://sqs.us-west-2.amazonaws.com/<account>/lecture-notes-processing
+PROCESS_SECRET=change-me
 ```
 
-**Important**: Both `SARVAM_API_KEY` and `NEXT_PUBLIC_SARVAM_API_KEY` should be set to the same value. The public one is used for client-side streaming, and the server one is used for API routes.
+## End Words (transcript line breaks)
+
+By default a transcript line closes every few seconds. Professors can instead
+control line breaks with **end words** — a line ends only when one is spoken, and
+the end word is **kept** at the end of the line.
+
+1. Open **Settings** in the sidebar and add one or more words/phrases
+   (e.g. `done`, `next question`). Matching is case-insensitive and whole-word.
+2. While recording, everything spoken accumulates into the current line (shown
+   as live in-progress text). When an end word is heard, the line is finalised
+   and a new line begins.
+3. The final diarized transcript is re-grouped by the same end words, so line
+   breaks and speaker labels share one source of truth.
+
+Stored in the `EndWord` table via `/api/settings/end-words`. With no end words
+configured the fallback is a periodic line break every 4 seconds.
 
 ## Project Structure
 
 ```
 app/
-├── api/recordings/       # API routes for CRUD operations
-├── dashboard/            # Dashboard pages
-│   ├── record/          # Recording interface
-│   ├── transcript/      # Transcript list and detail
-│   └── insights/        # Insights list and detail
-├── globals.css
+├── api/
+│   ├── realtime/session/           # Mints short-lived Voxtral realtime tokens
+│   ├── settings/end-words/         # End-word configuration
+│   └── recordings/                 # CRUD, [id]/diarize, [id]/process,
+│                                   #   [id]/audio, [id]/insights, segments, speakers
+├── dashboard/                      # record, transcript, insights, settings pages
 └── layout.tsx
 
-components/ui/           # shadcn/ui components
-contexts/               # React contexts
-hooks/                  # Custom React hooks
+components/ui/                      # shadcn/ui components
+contexts/                           # React contexts
+hooks/useTranscription.tsx          # recording + transcription orchestration
 lib/
-├── prisma.ts          # Prisma client
-└── utils.ts
-prisma/
-└── schema.prisma      # Database schema
+├── prisma.ts                       # Prisma client (pg adapter)
+├── mistral.ts                      # Mistral client + model config
+├── secrets.ts                      # Mistral key from env / Secrets Manager
+├── storage.ts                      # S3 audio + presigned URLs
+├── processing.ts                   # shared transcription/diarization core
+├── endWords.ts                     # end-word splitting/grouping
+├── audio.ts                        # WAV / PCM / base64 helpers
+├── transcription.ts                # language normalisation
+└── queue.ts                        # SQS enqueue helper
+
+lambda/process-audio/               # SQS worker (calls /api/recordings/[id]/process)
+infra/sst.config.ts                 # reference SST (v3) infrastructure-as-code
+scripts/aws-provision.sh            # reproducible AWS CLI provisioning
+Dockerfile                          # Next.js standalone image for ECR
+tests/                              # unit + API + browser E2E tests
 ```
 
 ## Database Schema
 
-The app uses SQLite with the following models:
-- **Recording**: Stores recording metadata (title, duration, status)
-- **TranscriptSegment**: Individual transcript segments with timestamps
-- **Speaker**: Speaker information with color coding
-- **Insights**: AI-generated summary, key points, and topics
+PostgreSQL via Prisma (`prisma/schema.prisma`):
+
+- **Recording** — metadata (title, date, duration, status, `audioPath`)
+- **TranscriptSegment** — one transcript line (text, timestamps, language, speaker)
+- **Speaker** — diarized speaker (label, name, colour)
+- **Insights** — summary, key points (JSON), topics (JSON), word count
+- **EndWord** — configured words that finish a transcript line
 
 ## Usage
 
-1. **Recording**: Go to the Record page and click the mic button to start recording
-2. **Transcripts**: View all recordings, search by title, or filter by date using the calendar
-3. **Insights**: Click on a recording to see AI-generated insights including summary and key points
+1. **Record** — open *Record*, name the lecture, press the mic.
+2. **Transcripts** — browse/search recordings; the calendar filters by date.
+3. **Insights** — open a recording to read its summary, key points and topics
+   (a transcript can be (re)analysed with the **Generate/Regenerate** button).
 
-## Calendar Filtering
+## AWS Deployment
 
-- Click a date in the sidebar calendar to filter recordings to that specific date
-- The active filter is shown as an orange indicator in both the sidebar and page header
-- Click the X or select the same date again to clear the filter
+```
+Browser ──▶ Next.js (EC2 container) ──▶ Mistral (Voxtral realtime + transcription)
+                │  ├── Amazon RDS PostgreSQL (Prisma)
+                │  ├── Amazon S3 (audio + presigned GET)
+                │  └── AWS Secrets Manager (Mistral key, DB URL)
+                └── SQS ──▶ Lambda ──▶ POST /api/recordings/{id}/process
+```
+
+- **EC2** (t4g.small, Docker image from **ECR**, `LabInstanceProfile`) runs the app.
+- **nginx + Let's Encrypt** terminate HTTPS (microphone needs a secure context).
+- **S3** stores audio; `Recording.audioPath` points at it and playback uses a
+  presigned URL (`/api/recordings/[id]/audio`).
+- **Secrets Manager** provides the Mistral key at runtime (no key in env on AWS).
+- **SQS + Lambda** decouple processing (`/api/recordings/[id]/process`, guarded
+  by `PROCESS_SECRET`).
+
+`scripts/aws-provision.sh` provisions the stack with the AWS CLI;
+`infra/sst.config.ts` is the equivalent infrastructure-as-code for a full account.
+
+## Testing
+
+Tests use Bun's runner and exercise the real HTTP API, database and Mistral API,
+so a reachable `DATABASE_URL` and `MISTRAL_API_KEY` are required.
+
+```bash
+bun run test:unit     # fast, no network
+bun run test:api      # boots the app and exercises every route
+bun run test:e2e      # headless Chromium: record → transcript → insights
+bun test              # all of the above
+```
+
+| Suite | File | Covers |
+| --- | --- | --- |
+| Unit | `tests/unit.test.ts` | audio/WAV/base64 helpers, language normalisation, Mistral client, end-word split/group |
+| API | `tests/api.test.ts` | recordings CRUD, segments/speakers, end-word config, realtime token mint, diarization, insights, realtime WebSocket |
+| E2E | `tests/e2e.test.ts` | fake-mic recording → live transcript → diarization → insights → transcript page |
+
+The E2E suite plays a speech fixture as the browser's microphone. Regenerate it
+on macOS:
+
+```bash
+say -v Daniel -o /tmp/fixture.aiff "The quick brown fox jumps over the lazy dog. Machine learning models learn patterns from data."
+ffmpeg -y -i /tmp/fixture.aiff -ac 1 -ar 16000 -c:a pcm_s16le tests/fixtures/speech.wav
+```
 
 ## License
 

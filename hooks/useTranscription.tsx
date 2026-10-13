@@ -5,10 +5,14 @@ import {
   useContext,
   useState,
   useRef,
-  useCallback,
   ReactNode,
 } from "react";
-import { SarvamAIClient } from "sarvamai";
+import {
+  convertFloat32ToInt16,
+  createWavBuffer,
+  int16ToBase64,
+} from "@/lib/audio";
+import { splitByEndWords } from "@/lib/endWords";
 
 // Types matching our Prisma schema
 export interface Speaker {
@@ -81,7 +85,20 @@ const TranscriptionContext = createContext<TranscriptionContextType | null>(
   null
 );
 
-const API_KEY = process.env.NEXT_PUBLIC_SARVAM_API_KEY || "";
+// Realtime events emitted by the Voxtral streaming endpoint.
+interface RealtimeEventData {
+  type?: string;
+  text?: string;
+  start?: number | null;
+  end?: number | null;
+  language?: string | null;
+  audio_language?: string | null;
+  usage?: unknown;
+  error?: { message?: string };
+}
+
+// How often accumulated live text is flushed into a transcript segment.
+const SEGMENT_FLUSH_MS = 4000;
 
 export function TranscriptionProvider({ children }: { children: ReactNode }) {
   // Recording state
@@ -106,78 +123,30 @@ export function TranscriptionProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string>("");
 
   // Refs for audio handling
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const socketRef = useRef<any>(null);
+  const socketRef = useRef<WebSocket | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
   const animationFrameRef = useRef<number | undefined>(undefined);
-  const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const segmentFlushRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Refs for data persistence
   const liveTranscriptsRef = useRef<TranscriptSegment[]>([]);
   const durationRef = useRef<number>(0);
   const recordingStartTimeRef = useRef<number>(0);
+  const detectedLanguageRef = useRef<string>("");
+  const pendingTextRef = useRef<string>("");
+  const lastSegmentEndRef = useRef<number>(0);
+  const endWordsRef = useRef<string[]>([]);
+  const sawDeltaRef = useRef<boolean>(false);
 
-  // Audio recording for diarization
+  // Audio recording for the final high-quality diarization pass
   const audioChunksRef = useRef<Float32Array[]>([]);
   const sampleRateRef = useRef<number>(16000);
 
   // Helper functions
-  const convertFloat32ToInt16 = (float32Array: Float32Array): Int16Array => {
-    const int16Array = new Int16Array(float32Array.length);
-    for (let i = 0; i < float32Array.length; i++) {
-      const s = Math.max(-1, Math.min(1, float32Array[i]));
-      int16Array[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
-    }
-    return int16Array;
-  };
-
-  const createWavBuffer = (
-    audioData: Float32Array,
-    sampleRate: number
-  ): ArrayBuffer => {
-    const int16Data = convertFloat32ToInt16(audioData);
-    const buffer = new ArrayBuffer(44 + int16Data.length * 2);
-    const view = new DataView(buffer);
-
-    const writeString = (view: DataView, offset: number, string: string) => {
-      for (let i = 0; i < string.length; i++) {
-        view.setUint8(offset + i, string.charCodeAt(i));
-      }
-    };
-
-    writeString(view, 0, "RIFF");
-    view.setUint32(4, 36 + int16Data.length * 2, true);
-    writeString(view, 8, "WAVE");
-    writeString(view, 12, "fmt ");
-    view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true);
-    view.setUint16(22, 1, true);
-    view.setUint32(24, sampleRate, true);
-    view.setUint32(28, sampleRate * 2, true);
-    view.setUint16(32, 2, true);
-    view.setUint16(34, 16, true);
-    writeString(view, 36, "data");
-    view.setUint32(40, int16Data.length * 2, true);
-
-    for (let i = 0; i < int16Data.length; i++) {
-      view.setInt16(44 + i * 2, int16Data[i], true);
-    }
-
-    return buffer;
-  };
-
-  const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
-    const bytes = new Uint8Array(buffer);
-    let binary = "";
-    for (let i = 0; i < bytes.byteLength; i++) {
-      binary += String.fromCharCode(bytes[i]);
-    }
-    return btoa(binary);
-  };
-
   const formatDuration = (seconds: number): string => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
@@ -202,130 +171,254 @@ export function TranscriptionProvider({ children }: { children: ReactNode }) {
     return new Blob([wavBuffer], { type: "audio/wav" });
   };
 
-  // Connect to Sarvam streaming API
-  const connectToSarvam = useCallback(async () => {
-    try {
-      const client = new SarvamAIClient({ apiSubscriptionKey: API_KEY });
+  const pushLiveSegment = (segment: TranscriptSegment) => {
+    setLiveTranscripts((prev) => {
+      const next = [...prev, segment];
+      liveTranscriptsRef.current = next;
+      return next;
+    });
+  };
 
-      const socket = await client.speechToTextStreaming.connect({
-        model: "saaras:v3",
-        mode: "transcribe",
-        "language-code": "unknown",
-        high_vad_sensitivity: "true",
-      } as unknown as Parameters<typeof client.speechToTextStreaming.connect>[0]);
+  const elapsedSeconds = () =>
+    recordingStartTimeRef.current
+      ? (Date.now() - recordingStartTimeRef.current) / 1000
+      : 0;
 
-      socketRef.current = socket;
+  // Finalize one transcript line (used by both flush strategies).
+  const pushSegmentLine = (text: string, endTime = elapsedSeconds()) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
 
-      socket.on("open", () => setIsConnected(true));
+    const startTime = lastSegmentEndRef.current;
+    const clampedEnd = Math.max(endTime, startTime);
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      socket.on("message", (response: any) => {
-        const data = response.data || response;
-        if (data.language_code) setDetectedLanguage(data.language_code);
-        if (data.transcript || data.text) {
-          const now = Date.now();
-          const startTime = (now - recordingStartTimeRef.current) / 1000;
+    pushLiveSegment({
+      text: trimmed,
+      timestamp: new Date(),
+      startTime,
+      endTime: clampedEnd,
+      languageCode: detectedLanguageRef.current || "en-IN",
+    });
 
-          const segment: TranscriptSegment = {
-            text: data.transcript || data.text || "",
-            timestamp: new Date(now),
-            startTime,
-            endTime: startTime,
-            languageCode: data.language_code || "en-IN",
-          };
+    lastSegmentEndRef.current = clampedEnd;
+  };
 
-          setLiveTranscripts((prev) => {
-            const next = [...prev, segment];
-            liveTranscriptsRef.current = next;
-            return next;
-          });
-        }
-      });
+  // End-word mode: only finalize a line when a configured end word is spoken.
+  const consumePendingByEndWords = () => {
+    const pending = pendingTextRef.current;
+    if (!pending) return;
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      socket.on("error", (err: any) =>
-        setError("Connection error: " + JSON.stringify(err))
-      );
-      socket.on("close", () => setIsConnected(false));
+    const { lines, remainder } = splitByEndWords(pending, endWordsRef.current);
 
-      await socket.waitForOpen();
-    } catch (err) {
-      console.error("Sarvam connection error:", err);
-      setError("Failed to connect to transcription service");
+    if (lines.length === 0) {
+      if (endWordsRef.current.length > 0) setStreamingText(pending);
+      return;
     }
-  }, []);
 
-  // Send audio chunk for live transcription
-  const sendAudioChunk = useCallback((audioData: Float32Array) => {
-    if (!socketRef.current) return;
+    const endTime = elapsedSeconds();
+    for (const line of lines) pushSegmentLine(line, endTime);
 
-    // Store chunk for later diarization
+    pendingTextRef.current = remainder;
+    setStreamingText(remainder.trimStart());
+  };
+
+  // Fallback behaviour when no end words are configured: flush on a timer.
+  const flushPendingByTimer = () => {
+    const text = pendingTextRef.current.trim();
+    if (!text) return;
+    pushSegmentLine(text);
+    pendingTextRef.current = "";
+    setStreamingText("");
+  };
+
+  // Flush whatever is left when the recording stops.
+  const flushRemainder = () => {
+    const text = pendingTextRef.current.trim();
+    if (text) pushSegmentLine(text);
+    pendingTextRef.current = "";
+    setStreamingText("");
+  };
+
+  const handleRealtimeMessage = (raw: string) => {
+    let data: RealtimeEventData;
+    try {
+      data = JSON.parse(raw) as RealtimeEventData;
+    } catch {
+      return;
+    }
+
+    switch (data.type) {
+      case "transcription.language":
+        if (data.audio_language) {
+          detectedLanguageRef.current = data.audio_language;
+          setDetectedLanguage(data.audio_language);
+        }
+        break;
+
+      case "transcription.text.delta":
+      case "transcription.segment":
+        // Accumulate text; line breaks are decided by end words (or the
+        // periodic timer when none are configured). Some sessions emit both
+        // deltas and segment events for the same audio, so only fall back to
+        // segment events when no deltas have been seen.
+        if (data.type === "transcription.text.delta") {
+          sawDeltaRef.current = true;
+        } else if (sawDeltaRef.current) {
+          break;
+        }
+
+        if (typeof data.text === "string" && data.text) {
+          const prefix =
+            pendingTextRef.current &&
+            !pendingTextRef.current.endsWith(" ") &&
+            !data.text.startsWith(" ")
+              ? " "
+              : "";
+          pendingTextRef.current += prefix + data.text;
+          consumePendingByEndWords();
+        }
+        break;
+
+      case "transcription.done":
+        flushRemainder();
+        if (data.language) {
+          detectedLanguageRef.current = data.language;
+          setDetectedLanguage(data.language);
+        }
+        break;
+
+      case "error":
+        setError(
+          typeof data.error?.message === "string"
+            ? data.error.message
+            : "Transcription error"
+        );
+        break;
+
+      default:
+        // Final summary frame may omit an explicit `type`.
+        if (!data.type && typeof data.text === "string" && data.usage) {
+          flushRemainder();
+        }
+    }
+  };
+
+  // Connect to the Voxtral realtime transcription WebSocket.
+  const connectToMistral = async () => {
+    const sessionResponse = await fetch("/api/realtime/session", {
+      method: "POST",
+    });
+
+    if (!sessionResponse.ok) {
+      throw new Error("Failed to create transcription session");
+    }
+
+    const { token, model, url } = (await sessionResponse.json()) as {
+      token: string;
+      model: string;
+      url?: string;
+    };
+
+    const baseUrl =
+      url || "wss://api.mistral.ai/v1/audio/transcriptions/realtime";
+    const socket = new WebSocket(
+      `${baseUrl}?model=${encodeURIComponent(model)}`,
+      ["realtime", token]
+    );
+    socketRef.current = socket;
+
+    socket.onmessage = (event) => handleRealtimeMessage(String(event.data));
+    socket.onerror = () => setError("Transcription connection error");
+    socket.onclose = () => setIsConnected(false);
+
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(
+        () => reject(new Error("Timed out connecting to transcription service")),
+        12000
+      );
+      socket.addEventListener(
+        "open",
+        () => {
+          clearTimeout(timeout);
+          resolve();
+        },
+        { once: true }
+      );
+      socket.addEventListener(
+        "error",
+        () => {
+          clearTimeout(timeout);
+          reject(new Error("Failed to connect to transcription service"));
+        },
+        { once: true }
+      );
+    });
+
+    setIsConnected(true);
+    socket.send(
+      JSON.stringify({
+        type: "session.update",
+        session: { audio_format: { encoding: "pcm_s16le", sample_rate: 16000 } },
+      })
+    );
+  };
+
+  // Send an audio chunk for live transcription (and keep it for the final pass).
+  const sendAudioChunk = (audioData: Float32Array) => {
     audioChunksRef.current.push(new Float32Array(audioData));
 
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+
     try {
-      const wavBuffer = createWavBuffer(audioData, 16000);
-      const base64Audio = arrayBufferToBase64(wavBuffer);
-      socketRef.current.transcribe({
-        audio: base64Audio,
-        sample_rate: 16000,
-        encoding: "audio/wav",
-      });
+      const pcm16 = convertFloat32ToInt16(audioData);
+      socket.send(
+        JSON.stringify({
+          type: "input_audio.append",
+          audio: int16ToBase64(pcm16),
+        })
+      );
     } catch (err) {
       console.error("Audio send error:", err);
     }
-  }, []);
+  };
 
-  // Generate AI insights using Sarvam LLM
-  const generateInsights = async (
-    recordingId: string,
-    fullText: string,
-    duration: number
-  ) => {
+  // Generate AI insights through the server-side Mistral route.
+  const generateInsights = async (recordingId: string, fullText: string) => {
     setIsGeneratingSummary(true);
     setStreamingText("");
 
     try {
-      const client = new SarvamAIClient({ apiSubscriptionKey: API_KEY });
-      const stream = await client.chat.completions({
-        model: "sarvam-105b" as Parameters<typeof client.chat.completions>[0]["model"],
-        messages: [
-          {
-            role: "system",
-            content: `You are an expert at analyzing lecture transcripts. Analyze the provided transcript (which may be in Hindi, English, or mixed languages) and provide insights in proper English.
-
-Return a JSON object with exactly these fields:
-- "summary": a concise 2-3 sentence overview of the lecture in English
-- "keyPoints": an array of 3-6 key takeaway strings in English
-- "topics": an array of 2-5 topic label strings in English
-
-Respond ONLY with valid JSON, no markdown fencing, no explanation.`,
-          },
-          {
-            role: "user",
-            content: `Analyze this lecture transcript:\n\n${fullText}`,
-          },
-        ],
-        temperature: 0.3,
-        max_tokens: 2000,
-        stream: true,
-      });
-
-      let accumulated = "";
-      for await (const chunk of stream) {
-        const content = chunk.choices[0]?.delta?.content ?? "";
-        if (content) {
-          accumulated += content;
-          setStreamingText(accumulated);
+      const response = await fetch(
+        `/api/recordings/${recordingId}/insights/generate`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ transcript: fullText }),
         }
+      );
+
+      if (!response.ok || !response.body) {
+        throw new Error("Failed to generate insights");
       }
 
-      // Parse the final accumulated JSON
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let accumulated = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        accumulated += decoder.decode(value, { stream: true });
+        setStreamingText(accumulated);
+      }
+      accumulated += decoder.decode();
+
       const jsonMatch = accumulated.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         const parsed = JSON.parse(jsonMatch[0]);
         const wordCount = fullText.split(/\s+/).filter(Boolean).length;
 
-        // Save insights to database
         await fetch(`/api/recordings/${recordingId}/insights`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -346,12 +439,6 @@ Respond ONLY with valid JSON, no markdown fencing, no explanation.`,
     }
   };
 
-  // Process audio with speaker diarization
-  const processDiarization = async (recordingId: string): Promise<boolean> => {
-    void recordingId;
-    return false;
-  };
-
   // Start recording
   const startRecording = async (title?: string) => {
     try {
@@ -361,7 +448,28 @@ Respond ONLY with valid JSON, no markdown fencing, no explanation.`,
       setRecordingDuration(0);
       durationRef.current = 0;
       audioChunksRef.current = [];
+      detectedLanguageRef.current = "";
+      setDetectedLanguage("");
+      pendingTextRef.current = "";
+      lastSegmentEndRef.current = 0;
+      sawDeltaRef.current = false;
       recordingStartTimeRef.current = Date.now();
+
+      // Load configured end words. With end words, a line only ends when one is
+      // spoken; otherwise we fall back to periodic flushing.
+      try {
+        const endWordsResponse = await fetch("/api/settings/end-words");
+        if (endWordsResponse.ok) {
+          const rows = (await endWordsResponse.json()) as Array<{
+            word: string;
+          }>;
+          endWordsRef.current = rows.map((row) => row.word);
+        } else {
+          endWordsRef.current = [];
+        }
+      } catch {
+        endWordsRef.current = [];
+      }
 
       // Create recording in database
       const response = await fetch("/api/recordings", {
@@ -403,9 +511,7 @@ Respond ONLY with valid JSON, no markdown fencing, no explanation.`,
       const processor = audioContext.createScriptProcessor(16384, 1, 1);
       processorRef.current = processor;
       processor.onaudioprocess = (e) => {
-        if (socketRef.current) {
-          sendAudioChunk(e.inputBuffer.getChannelData(0));
-        }
+        sendAudioChunk(e.inputBuffer.getChannelData(0));
       };
 
       source.connect(processor);
@@ -426,8 +532,16 @@ Respond ONLY with valid JSON, no markdown fencing, no explanation.`,
       };
       visualize();
 
-      // Connect to Sarvam for live transcription
-      await connectToSarvam();
+      // Connect to Voxtral for live transcription. If this fails we still
+      // capture the audio and transcribe it with diarization on stop.
+      try {
+        await connectToMistral();
+      } catch (connectionError) {
+        console.error("Realtime transcription unavailable:", connectionError);
+        setError(
+          "Live transcription unavailable - audio will be transcribed when you stop"
+        );
+      }
 
       // Start duration timer
       recordingTimerRef.current = setInterval(() => {
@@ -437,6 +551,14 @@ Respond ONLY with valid JSON, no markdown fencing, no explanation.`,
           return next;
         });
       }, 1000);
+
+      // Only use the periodic flush when no end words are configured.
+      if (endWordsRef.current.length === 0) {
+        segmentFlushRef.current = setInterval(
+          flushPendingByTimer,
+          SEGMENT_FLUSH_MS
+        );
+      }
 
       setIsRecording(true);
     } catch (err) {
@@ -448,24 +570,44 @@ Respond ONLY with valid JSON, no markdown fencing, no explanation.`,
 
   // Stop recording and process
   const stopRecording = async (): Promise<Recording | null> => {
-    // Stop audio processing
-    processorRef.current?.disconnect();
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    audioContextRef.current?.close();
-    socketRef.current?.close();
+    // Flush any partial live text before tearing down.
+    flushRemainder();
 
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current);
+    const socket = socketRef.current;
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      try {
+        socket.send(JSON.stringify({ type: "input_audio.flush" }));
+        socket.send(JSON.stringify({ type: "input_audio.end" }));
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      } catch {
+        // Ignore shutdown errors
+      }
+    }
+    socket?.close();
+    socketRef.current = null;
+
+    if (segmentFlushRef.current) {
+      clearInterval(segmentFlushRef.current);
+      segmentFlushRef.current = null;
     }
     if (recordingTimerRef.current) {
       clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
     }
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+    }
+
+    processorRef.current?.disconnect();
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    audioContextRef.current?.close();
 
     setIsRecording(false);
     setIsConnected(false);
     setAudioLevel(0);
 
-    if (!currentRecordingId) {
+    const recordingId = currentRecordingId;
+    if (!recordingId) {
       return null;
     }
 
@@ -473,11 +615,10 @@ Respond ONLY with valid JSON, no markdown fencing, no explanation.`,
 
     try {
       const duration = durationRef.current;
-      const segments = liveTranscriptsRef.current;
-      const fullText = segments.map((t) => t.text).join(" ");
+      const liveSegments = liveTranscriptsRef.current;
 
-      // Update recording with duration and segments
-      await fetch(`/api/recordings/${currentRecordingId}`, {
+      // Update recording with duration and mark as processing
+      await fetch(`/api/recordings/${recordingId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -486,34 +627,60 @@ Respond ONLY with valid JSON, no markdown fencing, no explanation.`,
         }),
       });
 
-      // Save live transcript segments
-      if (segments.length > 0) {
-        await fetch(`/api/recordings/${currentRecordingId}/segments`, {
+      // Save live transcript segments as a fallback
+      if (liveSegments.length > 0) {
+        await fetch(`/api/recordings/${recordingId}/segments`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ segments }),
+          body: JSON.stringify({ segments: liveSegments }),
         });
       }
 
-      // Process diarization (this will update segments with speaker info)
-      const diarizationSuccess = await processDiarization(currentRecordingId);
+      // High-quality pass: re-transcribe the full audio with speaker
+      // diarization. This replaces the live segments when it succeeds.
+      let finalRecording: Recording | null = null;
 
-      if (!diarizationSuccess) {
-        // If diarization fails, still mark as completed with live segments
-        await fetch(`/api/recordings/${currentRecordingId}`, {
+      if (audioChunksRef.current.length > 0) {
+        try {
+          const formData = new FormData();
+          formData.append("audio", createFullAudioBlob(), "recording.wav");
+
+          const diarizeResponse = await fetch(
+            `/api/recordings/${recordingId}/diarize`,
+            { method: "POST", body: formData }
+          );
+
+          if (diarizeResponse.ok) {
+            finalRecording = await diarizeResponse.json();
+          }
+        } catch (diarizeError) {
+          console.error("Diarization error:", diarizeError);
+        }
+      }
+
+      // Ensure the recording is marked completed if diarization didn't run.
+      if (!finalRecording) {
+        await fetch(`/api/recordings/${recordingId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ status: "completed" }),
         });
+        const response = await fetch(`/api/recordings/${recordingId}`);
+        finalRecording = await response.json();
       }
 
-      // Generate AI insights
-      if (fullText.trim()) {
-        await generateInsights(currentRecordingId, fullText, duration);
+      // Generate AI insights from the final transcript
+      const fullText = (finalRecording?.segments ?? liveSegments)
+        .map((segment) => segment.text)
+        .join(" ")
+        .trim();
+
+      if (fullText) {
+        await generateInsights(recordingId, fullText);
       }
 
       // Fetch final recording
-      const response = await fetch(`/api/recordings/${currentRecordingId}`);
+      const response = await fetch(`/api/recordings/${recordingId}`);
       const recording = await response.json();
 
       setIsProcessing(false);
@@ -524,7 +691,7 @@ Respond ONLY with valid JSON, no markdown fencing, no explanation.`,
       setIsProcessing(false);
 
       // Mark as failed
-      await fetch(`/api/recordings/${currentRecordingId}`, {
+      await fetch(`/api/recordings/${recordingId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: "failed" }),
@@ -541,6 +708,10 @@ Respond ONLY with valid JSON, no markdown fencing, no explanation.`,
     setRecordingDuration(0);
     durationRef.current = 0;
     setDetectedLanguage("");
+    detectedLanguageRef.current = "";
+    pendingTextRef.current = "";
+    lastSegmentEndRef.current = 0;
+    sawDeltaRef.current = false;
     setError("");
     setCurrentRecordingId(null);
     audioChunksRef.current = [];

@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Voice - Transcription & Insights",
-  description: "Real-time voice transcription powered by Sarvam AI",
+  description: "Real-time voice transcription powered by Mistral AI",
 };
 
 export default function RootLayout({

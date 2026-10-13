@@ -8,6 +8,9 @@ import { useTranscription } from "@/hooks/useTranscription";
 import { useRecordings } from "@/hooks/useRecordings";
 import { Button } from "@/components/ui/button";
 
+// Stable per-bar variance for the audio visualizer (computed once, not during render)
+const BAR_VARIANCE = Array.from({ length: 40 }, () => Math.random());
+
 export default function RecordPage() {
   const router = useRouter();
   const [lectureTitle, setLectureTitle] = useState("");
@@ -20,6 +23,7 @@ export default function RecordPage() {
     detectedLanguage, 
     audioLevel, 
     recordingDuration,
+    streamingText,
     startRecording, 
     stopRecording, 
     error 
@@ -157,7 +161,7 @@ export default function RecordPage() {
                 key={i}
                 className="w-[2px] rounded-full bg-[#f97316]"
                 animate={{
-                  height: [3, 4 + Math.random() * (audioLevel * 0.4), 3],
+                  height: [3, 4 + BAR_VARIANCE[i] * (audioLevel * 0.4), 3],
                   opacity: [0.3, 0.5 + (audioLevel / 200), 0.3]
                 }}
                 transition={{ duration: 0.3, repeat: Infinity, delay: i * 0.015 }}
@@ -173,13 +177,23 @@ export default function RecordPage() {
       </div>
 
       {/* Live transcript feed */}
-      {liveTranscripts.length > 0 && !isProcessing && (
+      {(liveTranscripts.length > 0 || streamingText.trim()) && !isProcessing && (
         <div className="border-t border-[#e8e8e8] max-h-[240px] overflow-y-auto">
           <div className="px-8 py-4 space-y-2">
             <div className="flex items-center justify-between mb-3">
               <span className="text-[10px] uppercase tracking-widest text-[#bbb]">Live Transcript</span>
               <span className="text-[11px] font-mono text-[#ccc]">{liveTranscripts.length} segments</span>
             </div>
+            {/* In-progress line (finalizes when an end word is spoken) */}
+            {streamingText.trim() && (
+              <div className="flex items-baseline gap-3">
+                <span className="text-[10px] font-mono text-[#f97316] shrink-0 w-6">•••</span>
+                <p className="text-[13px] leading-relaxed text-[#333]">
+                  {streamingText.trim()}
+                  <span className="text-[#f97316] animate-pulse">▍</span>
+                </p>
+              </div>
+            )}
             {[...liveTranscripts].reverse().slice(0, 8).map((t, i) => (
               <div key={i} className="flex items-baseline gap-3">
                 <span className="text-[10px] font-mono text-[#ccc] shrink-0 w-6">{getLang(t.languageCode)}</span>

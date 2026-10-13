@@ -1,7 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // Produce a self-contained server bundle for container deployment (ECR/App Runner).
+  output: "standalone",
 };
 
 export default nextConfig;

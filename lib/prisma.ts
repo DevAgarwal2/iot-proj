@@ -1,14 +1,9 @@
 import { PrismaClient } from "@/lib/generated/prisma/client";
-import { PrismaLibSql } from "@prisma/adapter-libsql";
-import path from "path";
+import { PrismaPg } from "@prisma/adapter-pg";
 
-// Use absolute path to ensure SQLite database is found regardless of working directory
-// Database is in root directory (dev.db), matching DATABASE_URL in .env
-const dbPath = path.join(process.cwd(), "dev.db");
+const connectionString = process.env.DATABASE_URL;
 
-const adapter = new PrismaLibSql({
-  url: `file:${dbPath}`,
-});
+const adapter = new PrismaPg(connectionString ?? "");
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;

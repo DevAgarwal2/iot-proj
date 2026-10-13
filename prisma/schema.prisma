@@ -7,7 +7,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
 }
 
 // A recording represents a single lecture/class session
@@ -82,4 +82,11 @@ model Insights {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// Words/phrases that finish the current transcript line when spoken
+model EndWord {
+  id        String   @id @default(cuid())
+  word      String   @unique // normalized (lowercase, trimmed)
+  createdAt DateTime @default(now())
 }

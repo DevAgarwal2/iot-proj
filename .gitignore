@@ -32,6 +32,7 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.local.example
 
 # vercel
 .vercel
@@ -46,3 +47,11 @@ next-env.d.ts
 /prisma/dev.db-journal
 dev.db
 dev.db-journal
+
+# local audio storage (when S3 is not configured)
+/.audio/
+
+# generated report artifacts & screenshots (AWS console shots contain account info)
+/docs/shots/
+/docs/aws-shots/
+

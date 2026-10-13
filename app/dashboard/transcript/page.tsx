@@ -21,18 +21,16 @@ import {
   Filter
 } from "lucide-react";
 import { useRecordingsContext, RecordingSummary } from "@/contexts/RecordingsContext";
-import type { Recording, TranscriptSegment, Speaker } from "@/hooks/useTranscription";
+import type { TranscriptSegment, Speaker } from "@/hooks/useTranscription";
 
 function TranscriptContent() {
   const searchParams = useSearchParams();
   const recordingIdFromUrl = searchParams.get("id");
   
   const {
-    recordingsByDate,
     selectedRecording,
     selectedDate,
     isLoading,
-    error,
     fetchRecording,
     fetchRecordingsByDate,
     deleteRecording,

@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { Mic, FileText, BarChart3, X } from "lucide-react";
+import { Mic, FileText, BarChart3, Settings, X } from "lucide-react";
 import { Calendar } from "@/components/ui/calendar";
 import { useTranscription } from "@/hooks/useTranscription";
 import { RecordingsProvider, useRecordingsContext } from "@/contexts/RecordingsContext";
@@ -12,11 +12,19 @@ const nav = [
   { href: "/dashboard/record", icon: Mic, label: "Record" },
   { href: "/dashboard/transcript", icon: FileText, label: "Transcripts" },
   { href: "/dashboard/insights", icon: BarChart3, label: "Insights" },
+  { href: "/dashboard/settings", icon: Settings, label: "Settings" },
 ];
+
+const emptySubscribe = () => () => {};
 
 function DashboardSidebar({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const [mounted, setMounted] = useState(false);
+  // `false` during server render / hydration, `true` once mounted on the client.
+  const mounted = useSyncExternalStore(
+    emptySubscribe,
+    () => true,
+    () => false
+  );
   const [calendarDate, setCalendarDate] = useState<Date | undefined>(undefined);
   const { isRecording, isConnected, isProcessing, liveTranscripts, recordingDuration } = useTranscription();
   const { 
@@ -26,12 +34,6 @@ function DashboardSidebar({ children }: { children: React.ReactNode }) {
     selectedDate,
     clearDateFilter,
   } = useRecordingsContext();
-
-  // Prevent hydration mismatch by only rendering calendar after mount
-  useEffect(() => {
-    setMounted(true);
-    setCalendarDate(new Date());
-  }, []);
 
   // Handle calendar date selection - clicking a date sets it as filter
   const handleDateSelect = (date: Date | undefined) => {

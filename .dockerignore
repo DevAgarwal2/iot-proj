@@ -1,0 +1,11 @@
+node_modules
+.next
+.git
+.audio
+*.log
+tests/fixtures
+.env
+.env.local
+.env.local.example
+Dockerfile
+.dockerignore

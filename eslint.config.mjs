@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Infra-as-code reference (SST) — not part of the app build:
+    "infra/**",
   ]),
 ]);
 

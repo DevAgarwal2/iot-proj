@@ -20,7 +20,10 @@ import {
   Pencil,
   Check,
   X,
-  Filter
+  Filter,
+  Sparkles,
+  Loader2,
+  RefreshCw
 } from "lucide-react";
 import { useRecordingsContext, RecordingSummary } from "@/contexts/RecordingsContext";
 import type { TranscriptSegment } from "@/hooks/useTranscription";
@@ -30,7 +33,6 @@ function InsightsContent() {
   const recordingIdFromUrl = searchParams.get("id");
 
   const {
-    recordingsByDate,
     selectedRecording,
     selectedDate,
     isLoading,
@@ -51,12 +53,89 @@ function InsightsContent() {
   const [editingRecordingId, setEditingRecordingId] = useState<string | null>(null);
   const [editingRecordingTitle, setEditingRecordingTitle] = useState("");
 
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState("");
+
+  // Generate (or regenerate) insights for the selected recording from its transcript
+  const generateInsights = async () => {
+    if (!selectedRecording || isGenerating) return;
+    const transcript = selectedRecording.segments
+      .map((s: TranscriptSegment) => s.text)
+      .join(" ")
+      .trim();
+
+    if (!transcript) {
+      setGenerateError("This recording has no transcript to analyse yet.");
+      return;
+    }
+
+    try {
+      setIsGenerating(true);
+      setGenerateError("");
+
+      const response = await fetch(
+        `/api/recordings/${selectedRecording.id}/insights/generate`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ transcript }),
+        }
+      );
+      if (!response.ok || !response.body) {
+        throw new Error("Failed to generate insights");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let accumulated = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        accumulated += decoder.decode(value, { stream: true });
+      }
+      accumulated += decoder.decode();
+
+      const match = accumulated.match(/\{[\s\S]*\}/);
+      if (!match) throw new Error("Invalid insights response");
+      const parsed = JSON.parse(match[0]);
+      const wordCount = transcript.split(/\s+/).filter(Boolean).length;
+
+      const save = await fetch(
+        `/api/recordings/${selectedRecording.id}/insights`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            summary: parsed.summary || "No summary available.",
+            keyPoints: parsed.keyPoints || [],
+            topics: parsed.topics || [],
+            wordCount,
+          }),
+        }
+      );
+      if (!save.ok) throw new Error("Failed to save insights");
+
+      await fetchRecording(selectedRecording.id);
+    } catch (err) {
+      setGenerateError(
+        err instanceof Error ? err.message : "Failed to generate insights"
+      );
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
   // Load recording from URL param
   useEffect(() => {
     if (recordingIdFromUrl) {
       fetchRecording(recordingIdFromUrl);
     }
   }, [recordingIdFromUrl, fetchRecording]);
+
+  // Refresh the list whenever this page mounts (so new recordings show up)
+  useEffect(() => {
+    fetchRecordingsByDate();
+  }, [fetchRecordingsByDate]);
 
   // Apply search filter on top of date filter
   const searchFilteredRecordings = useMemo(() => {
@@ -350,7 +429,20 @@ function InsightsContent() {
           <h1 className="text-[13px] font-medium text-[#111]">{selectedRecording.title}</h1>
           <span className="text-[11px] text-[#bbb]">{formatDateTime(selectedRecording.date)}</span>
           {insights && (
-            <span className="text-[10px] font-mono text-[#ccc] uppercase">sarvam-105b</span>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={generateInsights}
+              disabled={isGenerating}
+              className="h-6 px-2 text-[10px] text-[#999] hover:text-[#333] hover:bg-[#f0f0f0]"
+            >
+              {isGenerating ? (
+                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+              ) : (
+                <RefreshCw className="h-3 w-3 mr-1" />
+              )}
+              Regenerate
+            </Button>
           )}
         </div>
         <Button 
@@ -368,7 +460,32 @@ function InsightsContent() {
           <div className="h-full flex flex-col items-center justify-center">
             <BarChart3 className="h-8 w-8 text-[#ddd] mb-3" strokeWidth={1} />
             <p className="text-[13px] text-[#bbb]">No insights generated</p>
-            <p className="text-[11px] text-[#ccc] mt-1">Insights are generated automatically after recording</p>
+            {selectedRecording.segments.length > 0 ? (
+              <>
+                <p className="text-[11px] text-[#ccc] mt-1">
+                  Generate a summary, key points and topics from this transcript.
+                </p>
+                <Button
+                  onClick={generateInsights}
+                  disabled={isGenerating}
+                  className="mt-4 text-[12px] bg-[#111] text-white hover:bg-[#333]"
+                >
+                  {isGenerating ? (
+                    <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-3.5 w-3.5 mr-1.5" />
+                  )}
+                  {isGenerating ? "Generating..." : "Generate insights"}
+                </Button>
+              </>
+            ) : (
+              <p className="text-[11px] text-[#ccc] mt-1">
+                This recording has no transcript yet.
+              </p>
+            )}
+            {generateError && (
+              <p className="text-[11px] text-[#ef4444] mt-3">{generateError}</p>
+            )}
           </div>
         ) : (
           <ScrollArea className="h-full">
