@@ -141,6 +141,7 @@ export function TranscriptionProvider({ children }: { children: ReactNode }) {
   const lastSegmentEndRef = useRef<number>(0);
   const endWordsRef = useRef<string[]>([]);
   const sawDeltaRef = useRef<boolean>(false);
+  const realtimeErrorRef = useRef<boolean>(false);
 
   // Audio recording for the final high-quality diarization pass
   const audioChunksRef = useRef<Float32Array[]>([]);
@@ -268,6 +269,11 @@ export function TranscriptionProvider({ children }: { children: ReactNode }) {
         }
 
         if (typeof data.text === "string" && data.text) {
+          // Recovered: clear any transient live-transcription error.
+          if (realtimeErrorRef.current) {
+            realtimeErrorRef.current = false;
+            setError("");
+          }
           const prefix =
             pendingTextRef.current &&
             !pendingTextRef.current.endsWith(" ") &&
@@ -287,13 +293,21 @@ export function TranscriptionProvider({ children }: { children: ReactNode }) {
         }
         break;
 
-      case "error":
-        setError(
-          typeof data.error?.message === "string"
-            ? data.error.message
-            : "Transcription error"
-        );
+      case "error": {
+        const raw =
+          typeof data.error?.message === "string" ? data.error.message : "";
+        realtimeErrorRef.current = true;
+        // Provider-side transient errors (e.g. vLLM queue overflow) should not
+        // look catastrophic; the recording continues and is transcribed on stop.
+        if (/QueueOverflow|Unexpected </i.test(raw) || !raw) {
+          setError(
+            "Live transcription is briefly unavailable — recording continues"
+          );
+        } else {
+          setError(raw.slice(0, 140));
+        }
         break;
+      }
 
       default:
         // Final summary frame may omit an explicit `type`.
@@ -453,6 +467,7 @@ export function TranscriptionProvider({ children }: { children: ReactNode }) {
       pendingTextRef.current = "";
       lastSegmentEndRef.current = 0;
       sawDeltaRef.current = false;
+      realtimeErrorRef.current = false;
       recordingStartTimeRef.current = Date.now();
 
       // Load configured end words. With end words, a line only ends when one is
@@ -712,6 +727,7 @@ export function TranscriptionProvider({ children }: { children: ReactNode }) {
     pendingTextRef.current = "";
     lastSegmentEndRef.current = 0;
     sawDeltaRef.current = false;
+    realtimeErrorRef.current = false;
     setError("");
     setCurrentRecordingId(null);
     audioChunksRef.current = [];
