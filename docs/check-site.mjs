@@ -5,7 +5,7 @@ import fs from "node:fs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixture = path.join(here, "..", "tests", "fixtures", "speech.wav");
-const base = process.env.APP_URL || "http://35.95.2.77";
+const base = process.env.APP_URL || "http://localhost:3000";
 const shots = path.join(here, "shots");
 fs.mkdirSync(shots, { recursive: true });
 
@@ -38,7 +38,7 @@ try {
   log("recording started");
 
   // 3. wait for live transcription
-  await page.waitForSelector("text=Live Transcript", { timeout: 40000 });
+  await page.waitForSelector("text=Live notes", { timeout: 40000 });
   await page.waitForTimeout(11000);
   await page.screenshot({ path: path.join(shots, "02-live.png") });
   const liveText = (await page.textContent("body")) ?? "";

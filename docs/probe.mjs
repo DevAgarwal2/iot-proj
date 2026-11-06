@@ -1,6 +1,6 @@
 import { chromium } from "playwright";
 
-const base = process.env.APP_URL || "http://35.95.2.77";
+const base = process.env.APP_URL || "http://localhost:3000";
 const browser = await chromium.launch({
   channel: "chromium",
   args: [

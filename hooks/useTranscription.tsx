@@ -10,7 +10,6 @@ import {
 import {
   convertFloat32ToInt16,
   createWavBuffer,
-  int16ToBase64,
 } from "@/lib/audio";
 import { splitByEndWords } from "@/lib/endWords";
 
@@ -85,20 +84,16 @@ const TranscriptionContext = createContext<TranscriptionContextType | null>(
   null
 );
 
-// Realtime events emitted by the Voxtral streaming endpoint.
+// Realtime events emitted by the Gnani streaming proxy.
 interface RealtimeEventData {
   type?: string;
   text?: string;
-  start?: number | null;
-  end?: number | null;
-  language?: string | null;
-  audio_language?: string | null;
-  usage?: unknown;
+  message?: string;
+  detected_language_code?: string;
+  segment_index?: number;
+  is_final?: boolean;
   error?: { message?: string };
 }
-
-// How often accumulated live text is flushed into a transcript segment.
-const SEGMENT_FLUSH_MS = 4000;
 
 export function TranscriptionProvider({ children }: { children: ReactNode }) {
   // Recording state
@@ -130,7 +125,6 @@ export function TranscriptionProvider({ children }: { children: ReactNode }) {
   const processorRef = useRef<ScriptProcessorNode | null>(null);
   const animationFrameRef = useRef<number | undefined>(undefined);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const segmentFlushRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Refs for data persistence
   const liveTranscriptsRef = useRef<TranscriptSegment[]>([]);
@@ -140,7 +134,6 @@ export function TranscriptionProvider({ children }: { children: ReactNode }) {
   const pendingTextRef = useRef<string>("");
   const lastSegmentEndRef = useRef<number>(0);
   const endWordsRef = useRef<string[]>([]);
-  const sawDeltaRef = useRef<boolean>(false);
   const realtimeErrorRef = useRef<boolean>(false);
 
   // Audio recording for the final high-quality diarization pass
@@ -249,100 +242,85 @@ export function TranscriptionProvider({ children }: { children: ReactNode }) {
     }
 
     switch (data.type) {
-      case "transcription.language":
-        if (data.audio_language) {
-          detectedLanguageRef.current = data.audio_language;
-          setDetectedLanguage(data.audio_language);
-        }
+      case "connected":
+        setIsConnected(true);
+        realtimeErrorRef.current = false;
+        setError("");
         break;
 
-      case "transcription.text.delta":
-      case "transcription.segment":
-        // Accumulate text; line breaks are decided by end words (or the
-        // periodic timer when none are configured). Some sessions emit both
-        // deltas and segment events for the same audio, so only fall back to
-        // segment events when no deltas have been seen.
-        if (data.type === "transcription.text.delta") {
-          sawDeltaRef.current = true;
-        } else if (sawDeltaRef.current) {
-          break;
+      case "transcript":
+        if (data.detected_language_code) {
+          detectedLanguageRef.current = data.detected_language_code;
+          setDetectedLanguage(data.detected_language_code);
         }
 
-        if (typeof data.text === "string" && data.text) {
+        if (typeof data.text === "string" && data.text.trim()) {
           // Recovered: clear any transient live-transcription error.
           if (realtimeErrorRef.current) {
             realtimeErrorRef.current = false;
             setError("");
           }
+
+          const text = data.text.trim();
           const prefix =
             pendingTextRef.current &&
-            !pendingTextRef.current.endsWith(" ") &&
-            !data.text.startsWith(" ")
+            !pendingTextRef.current.endsWith(" ")
               ? " "
               : "";
-          pendingTextRef.current += prefix + data.text;
-          consumePendingByEndWords();
+          pendingTextRef.current += prefix + text;
+
+          if (endWordsRef.current.length === 0) {
+            // Gnani already splits on speech pauses, so each transcript is a line.
+            flushPendingByTimer();
+          } else {
+            consumePendingByEndWords();
+          }
         }
         break;
 
-      case "transcription.done":
+      case "done":
         flushRemainder();
-        if (data.language) {
-          detectedLanguageRef.current = data.language;
-          setDetectedLanguage(data.language);
-        }
         break;
 
       case "error": {
-        const raw =
-          typeof data.error?.message === "string" ? data.error.message : "";
+        const message =
+          typeof data.message === "string"
+            ? data.message
+            : typeof data.error?.message === "string"
+              ? data.error.message
+              : "";
         realtimeErrorRef.current = true;
-        // Provider-side transient errors (e.g. vLLM queue overflow) should not
-        // look catastrophic; the recording continues and is transcribed on stop.
-        if (/QueueOverflow|Unexpected </i.test(raw) || !raw) {
+        // Provider/connection errors should not look catastrophic; the
+        // recording continues and is transcribed on stop.
+        if (
+          !message ||
+          /rate|limit|busy|timeout|unavailable|connection|socket/i.test(message)
+        ) {
           setError(
             "Live transcription is briefly unavailable — recording continues"
           );
         } else {
-          setError(raw.slice(0, 140));
+          setError(message.slice(0, 140));
         }
         break;
       }
-
-      default:
-        // Final summary frame may omit an explicit `type`.
-        if (!data.type && typeof data.text === "string" && data.usage) {
-          flushRemainder();
-        }
     }
   };
 
-  // Connect to the Voxtral realtime transcription WebSocket.
-  const connectToMistral = async () => {
-    const sessionResponse = await fetch("/api/realtime/session", {
-      method: "POST",
-    });
-
-    if (!sessionResponse.ok) {
-      throw new Error("Failed to create transcription session");
-    }
-
-    const { token, model, url } = (await sessionResponse.json()) as {
-      token: string;
-      model: string;
-      url?: string;
-    };
-
-    const baseUrl =
-      url || "wss://api.mistral.ai/v1/audio/transcriptions/realtime";
+  // Connect to the same-origin WebSocket proxy that talks to Gnani. The proxy
+  // attaches the API key, which a browser cannot send on a WebSocket.
+  const connectToGnani = async () => {
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const socket = new WebSocket(
-      `${baseUrl}?model=${encodeURIComponent(model)}`,
-      ["realtime", token]
+      `${protocol}//${window.location.host}/api/stt/stream`
     );
     socketRef.current = socket;
 
     socket.onmessage = (event) => handleRealtimeMessage(String(event.data));
-    socket.onerror = () => setError("Transcription connection error");
+    socket.onerror = () => {
+      realtimeErrorRef.current = true;
+      setError("Live captions reconnecting — recording continues");
+    };
     socket.onclose = () => setIsConnected(false);
 
     await new Promise<void>((resolve, reject) => {
@@ -369,12 +347,6 @@ export function TranscriptionProvider({ children }: { children: ReactNode }) {
     });
 
     setIsConnected(true);
-    socket.send(
-      JSON.stringify({
-        type: "session.update",
-        session: { audio_format: { encoding: "pcm_s16le", sample_rate: 16000 } },
-      })
-    );
   };
 
   // Send an audio chunk for live transcription (and keep it for the final pass).
@@ -386,12 +358,7 @@ export function TranscriptionProvider({ children }: { children: ReactNode }) {
 
     try {
       const pcm16 = convertFloat32ToInt16(audioData);
-      socket.send(
-        JSON.stringify({
-          type: "input_audio.append",
-          audio: int16ToBase64(pcm16),
-        })
-      );
+      socket.send(pcm16);
     } catch (err) {
       console.error("Audio send error:", err);
     }
@@ -466,7 +433,6 @@ export function TranscriptionProvider({ children }: { children: ReactNode }) {
       setDetectedLanguage("");
       pendingTextRef.current = "";
       lastSegmentEndRef.current = 0;
-      sawDeltaRef.current = false;
       realtimeErrorRef.current = false;
       recordingStartTimeRef.current = Date.now();
 
@@ -547,14 +513,15 @@ export function TranscriptionProvider({ children }: { children: ReactNode }) {
       };
       visualize();
 
-      // Connect to Voxtral for live transcription. If this fails we still
+      // Connect to Gnani for live transcription. If this fails we still
       // capture the audio and transcribe it with diarization on stop.
       try {
-        await connectToMistral();
+        await connectToGnani();
       } catch (connectionError) {
         console.error("Realtime transcription unavailable:", connectionError);
+        realtimeErrorRef.current = true;
         setError(
-          "Live transcription unavailable - audio will be transcribed when you stop"
+          "Live captions unavailable — audio will be transcribed when you stop"
         );
       }
 
@@ -566,14 +533,6 @@ export function TranscriptionProvider({ children }: { children: ReactNode }) {
           return next;
         });
       }, 1000);
-
-      // Only use the periodic flush when no end words are configured.
-      if (endWordsRef.current.length === 0) {
-        segmentFlushRef.current = setInterval(
-          flushPendingByTimer,
-          SEGMENT_FLUSH_MS
-        );
-      }
 
       setIsRecording(true);
     } catch (err) {
@@ -591,9 +550,9 @@ export function TranscriptionProvider({ children }: { children: ReactNode }) {
     const socket = socketRef.current;
     if (socket && socket.readyState === WebSocket.OPEN) {
       try {
-        socket.send(JSON.stringify({ type: "input_audio.flush" }));
-        socket.send(JSON.stringify({ type: "input_audio.end" }));
-        await new Promise((resolve) => setTimeout(resolve, 300));
+        socket.send(JSON.stringify({ type: "commit" }));
+        // Give Gnani a moment to transcribe the final utterance.
+        await new Promise((resolve) => setTimeout(resolve, 2500));
       } catch {
         // Ignore shutdown errors
       }
@@ -601,10 +560,6 @@ export function TranscriptionProvider({ children }: { children: ReactNode }) {
     socket?.close();
     socketRef.current = null;
 
-    if (segmentFlushRef.current) {
-      clearInterval(segmentFlushRef.current);
-      segmentFlushRef.current = null;
-    }
     if (recordingTimerRef.current) {
       clearInterval(recordingTimerRef.current);
       recordingTimerRef.current = null;
@@ -726,7 +681,6 @@ export function TranscriptionProvider({ children }: { children: ReactNode }) {
     detectedLanguageRef.current = "";
     pendingTextRef.current = "";
     lastSegmentEndRef.current = 0;
-    sawDeltaRef.current = false;
     realtimeErrorRef.current = false;
     setError("");
     setCurrentRecordingId(null);

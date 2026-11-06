@@ -27,9 +27,13 @@ RUN apt-get update -y && apt-get install -y openssl ca-certificates && rm -rf /v
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
+# Custom server + WebSocket proxy dependencies (not traced by Next.js)
+COPY --from=builder /app/server.mjs ./server.mjs
+COPY --from=builder /app/node_modules/ws ./node_modules/ws
+COPY --from=builder /app/node_modules/@next/env ./node_modules/@next/env
 # Prisma schema + generated client (runtime uses the pg driver adapter)
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/lib/generated ./lib/generated
 
 EXPOSE 3000
-CMD ["node", "server.js"]
+CMD ["node", "server.mjs"]

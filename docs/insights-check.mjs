@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const base = process.env.APP_URL || "https://35.95.2.77.nip.io";
+const base = process.env.APP_URL || "http://localhost:3000";
 const shots = path.join(here, "shots");
 
 const browser = await chromium.launch({ channel: "chromium" });

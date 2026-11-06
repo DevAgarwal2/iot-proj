@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixture = path.join(here, "..", "tests", "fixtures", "speech.wav");
-const base = process.env.APP_URL || "https://35.95.2.77.nip.io";
+const base = process.env.APP_URL || "http://localhost:3000";
 
 const log = (m) => console.log(m);
 let endWordId = null;
@@ -46,7 +46,7 @@ try {
   await page.waitForSelector("button:has(svg.lucide-square)", { timeout: 30000 });
 
   // In-progress text should appear quickly (before any end word)
-  await page.waitForSelector("text=Live Transcript", { timeout: 40000 });
+  await page.waitForSelector("text=Live notes", { timeout: 40000 });
   await page.waitForTimeout(11000);
   await page.screenshot({ path: path.join(here, "shots", "10-live-endword.png") });
 

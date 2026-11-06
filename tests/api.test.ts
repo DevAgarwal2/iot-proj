@@ -58,29 +58,6 @@ async function postDiarize(id: string, wav: Buffer, filename = "speech.wav") {
 }
 
 // ---------------------------------------------------------------------------
-// Realtime session
-// ---------------------------------------------------------------------------
-describe("API: /api/realtime/session", () => {
-  it("mints a scoped short-lived realtime token", async () => {
-    const response = await fetch(`${base}/api/realtime/session`, {
-      method: "POST",
-    });
-    expect(response.status).toBe(200);
-
-    const body = await response.json();
-    expect(body.token).toMatch(/^rt_/);
-    expect(body.model).toBe("voxtral-mini-transcribe-realtime-2602");
-    expect(body.url).toBe("wss://api.mistral.ai/v1/audio/transcriptions/realtime");
-    expect(new Date(body.expiresAt).getTime()).toBeGreaterThan(Date.now());
-  }, 30_000);
-
-  it("rejects the wrong HTTP method", async () => {
-    const response = await fetch(`${base}/api/realtime/session`);
-    expect(response.status).toBe(405);
-  });
-});
-
-// ---------------------------------------------------------------------------
 // Recordings CRUD
 // ---------------------------------------------------------------------------
 describe("API: recordings CRUD", () => {
@@ -446,17 +423,12 @@ describe("API: end-word transcript grouping", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Realtime WebSocket protocol (live Mistral call)
+// Realtime WebSocket proxy (live Gnani call)
 // ---------------------------------------------------------------------------
 describe("Realtime WebSocket transcription", () => {
   it("transcribes streamed PCM audio and finishes cleanly", async () => {
-    const sessionResponse = await fetch(`${base}/api/realtime/session`, {
-      method: "POST",
-    });
-    const { token, model, url } = await sessionResponse.json();
-
     const pcm = wavToPcm(fixtureWav);
-    const transcript = await transcribeOverWebSocket({ token, model, url, pcm });
+    const transcript = await transcribeOverWebSocket({ pcm });
 
     expect(transcript.toLowerCase()).toContain("fox");
     expect(transcript.toLowerCase()).toContain("learning");
@@ -465,22 +437,13 @@ describe("Realtime WebSocket transcription", () => {
 });
 
 interface RealtimeArgs {
-  token: string;
-  model: string;
-  url: string;
   pcm: Buffer;
 }
 
-function transcribeOverWebSocket({
-  token,
-  model,
-  url,
-  pcm,
-}: RealtimeArgs): Promise<string> {
+function transcribeOverWebSocket({ pcm }: RealtimeArgs): Promise<string> {
   return new Promise((resolve, reject) => {
     const socket = new WebSocket(
-      `${url}?model=${encodeURIComponent(model)}`,
-      ["realtime", token]
+      `${base.replace(/^http/, "ws")}/api/stt/stream`
     );
 
     let streamedText = "";
@@ -507,53 +470,28 @@ function transcribeOverWebSocket({
 
     const timeout = setTimeout(
       () => fail(new Error("Realtime transcription timed out")),
-      90_000
+      120_000
     );
 
-    socket.addEventListener("open", async () => {
-      socket.send(
-        JSON.stringify({
-          type: "session.update",
-          session: {
-            audio_format: { encoding: "pcm_s16le", sample_rate: 16000 },
-          },
-        })
-      );
-
-      const bytesPerChunk = (16000 * 2 * 120) / 1000; // 120ms frames
-      for (let i = 0; i < pcm.length; i += bytesPerChunk) {
-        socket.send(
-          JSON.stringify({
-            type: "input_audio.append",
-            audio: pcm.subarray(i, i + bytesPerChunk).toString("base64"),
-          })
-        );
-        await new Promise((r) => setTimeout(r, 40));
+    socket.addEventListener("open", () => {
+      // The proxy re-chunks and paces these frames for Gnani.
+      const chunkSize = 3200; // 100 ms of 16 kHz PCM
+      for (let i = 0; i < pcm.length; i += chunkSize) {
+        socket.send(new Uint8Array(pcm.subarray(i, i + chunkSize)));
       }
-
-      socket.send(JSON.stringify({ type: "input_audio.flush" }));
-      socket.send(JSON.stringify({ type: "input_audio.end" }));
+      socket.send(JSON.stringify({ type: "commit" }));
     });
 
     socket.addEventListener("message", (event) => {
       const data = JSON.parse(String(event.data));
-      if (
-        (data.type === "transcription.text.delta" ||
-          (!data.type && typeof data.text === "string")) &&
-        typeof data.text === "string"
-      ) {
-        streamedText += data.text;
+      if (data.type === "transcript" && typeof data.text === "string") {
+        streamedText += ` ${data.text}`;
       }
-
-      const isDone =
-        data.type === "transcription.done" ||
-        (typeof data.text === "string" && Boolean(data.usage));
-      if (isDone) {
-        finish(typeof data.text === "string" ? data.text : streamedText);
+      if (data.type === "done") {
+        finish(streamedText);
       }
-
       if (data.type === "error") {
-        fail(new Error(data.error?.message ?? "Realtime transcription error"));
+        fail(new Error(data.message ?? "Realtime transcription error"));
       }
     });
 

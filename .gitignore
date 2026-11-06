@@ -48,10 +48,9 @@ next-env.d.ts
 dev.db
 dev.db-journal
 
-# local audio storage (when S3 is not configured)
+# local audio storage
 /.audio/
 
-# generated report artifacts & screenshots (AWS console shots contain account info)
+# generated report artifacts & screenshots
 /docs/shots/
-/docs/aws-shots/
 

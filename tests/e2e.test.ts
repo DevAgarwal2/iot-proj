@@ -120,7 +120,7 @@ describe("E2E: record -> live transcript -> diarize -> insights", () => {
     });
 
     // Live transcription should produce at least one segment within ~20s.
-    await page.waitForSelector("text=Live Transcript", { timeout: 30_000 });
+    await page.waitForSelector("text=Live notes", { timeout: 30_000 });
 
     // Capture several seconds of (looped) speech.
     await page.waitForTimeout(12_000);

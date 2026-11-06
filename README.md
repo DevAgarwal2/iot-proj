@@ -1,22 +1,42 @@
 # Lecture Notes App
 
 A voice transcription application for professors to record and organise lecture
-notes. It captures lecture audio in the browser, transcribes it **live**, then
-produces a **speaker-labelled transcript** and AI-generated **insights**
-(summary, key points, topics). Built with Next.js 16, Mistral AI (Voxtral) and
-PostgreSQL, and deployable to AWS.
+notes. It captures lecture audio in the browser, transcribes it **live** with
+Gnani (Vachana) STT, then produces a **speaker-labelled transcript** and
+AI-generated **insights** (summary, key points, topics). Built with Next.js 16,
+Gnani Prisma, Mistral and PostgreSQL.
+
+## What’s new in this build
+
+- **Gnani Prisma v3.0** now handles all speech-to-text — live captions over a
+  same-origin WebSocket proxy, and a diarized batch pass for the final
+  transcript.
+- **Local-first runtime** — AWS S3, Secrets Manager, SQS and Lambda are gone;
+  audio is stored on disk and configuration comes from `.env`.
+- **Warm editorial UI** — paper-white canvas, stone sidebar, Instrument Serif
+  display type and a burnt-orange accent, with a recent-lecture rail and a
+  dedicated live-notes panel.
+- **Mistral Small** remains the insights engine only.
 
 ## Features
 
-- **Real-time recording** with live transcription via Voxtral Realtime
-- **Speaker diarization** — a second Voxtral pass labels who said what
+- **Real-time recording** with live transcription via Gnani Realtime
+- **Speaker diarization** — a Gnani Batch pass labels who said what
 - **End words** — control transcript line breaks: a line ends only when the
   speaker says a configured word ("done", "next question", …)
 - **AI insights** — summary, key points and topics per recording
 - **Calendar + search** — organise recordings by date and title
 - **Transcript tools** — view, edit, copy and export
-- **Cloud-ready** — recorded audio in Amazon S3 (presigned playback), data in
-  Amazon RDS, secrets in AWS Secrets Manager, async processing via SQS + Lambda
+- **Local-first storage** — recorded audio is written to disk, data lives in
+  PostgreSQL
+
+## Design
+
+The interface is a warm editorial light theme built for a lecture hall:
+paper-white canvas, a warm stone sidebar, Instrument Serif display type and a
+burnt-orange accent. The sidebar keeps recent lectures and a compact calendar
+within reach; during recording, live notes sit in a dedicated right rail so the
+transcript never competes with the record control.
 
 ## Tech Stack
 
@@ -24,32 +44,49 @@ PostgreSQL, and deployable to AWS.
 | --- | --- |
 | Framework | Next.js 16 (App Router, Turbopack), React 19, TypeScript |
 | Styling / UI | Tailwind CSS v4, shadcn/ui, lucide-react, framer-motion |
-| Data | Prisma ORM + `@prisma/adapter-pg` → PostgreSQL (Amazon RDS) |
-| AI | Mistral AI — Voxtral (speech-to-text), Mistral Small (insights) |
-| Cloud | Amazon S3, RDS, Secrets Manager, SQS, Lambda, ECR, EC2 |
-| Tooling | Bun, Docker, Playwright |
+| Data | Prisma ORM + `@prisma/adapter-pg` → PostgreSQL |
+| STT | Gnani Vachana — Prisma v3.0 (Realtime + Batch with diarization) |
+| Insights | Mistral Small |
+| Tooling | Bun, Playwright, `ws` (WebSocket proxy) |
 
 ## Models
 
-Defined in `lib/mistral.ts` (see the [Mistral audio docs](https://docs.mistral.ai/capabilities/audio/)).
+Defined in `lib/gnani.ts` and `lib/mistral.ts`.
 
 | Purpose | Model |
 | --- | --- |
-| Live streaming transcription | `voxtral-mini-transcribe-realtime-2602` |
-| Batch transcription + speaker diarization | `voxtral-mini-latest` |
+| Live streaming transcription | Gnani `prisma-v3.0` (Realtime WebSocket) |
+| Batch transcription + speaker diarization | Gnani `prisma-v3.0` (Batch API) |
 | Insights / summaries | `mistral-small-latest` |
 
-The API key is used **only on the server**. The browser receives short-lived
-realtime tokens minted via `/api/realtime/session`, so the key is never exposed
-to the client.
+Both API keys are used **only on the server**. The browser talks to a same-origin
+WebSocket proxy (`/api/stt/stream`) which attaches the Gnani key, so the key is
+never exposed to the client. Mistral is called server-side for insights.
+
+> The app runs through `server.mjs` (not plain `next dev`) because that server
+> also hosts the Gnani WebSocket proxy. `bun run dev` and `bun run start` already
+> use it.
+
+### Gnani specifics
+
+- **Live**: 16 kHz mono PCM, 1024-byte frames at 32 ms cadence, proxied to
+  `wss://api.vachana.ai/stt/v3/stream` with `model=prisma-v3.0`. The default
+  language hint is `en-IN,hi-IN`: the proxy sends `en-IN` as the primary locale
+  plus `multi_lang_codes=en-IN,hi-IN`. Sessions reconnect before Gnani's
+  15-minute cap.
+- **Final transcript**: Gnani Batch with `with_diarization: true`. Uploads up to
+  10 MB go direct; larger recordings use Gnani's presigned upload.
+- **Rate limiting**: this account allows one active request at a time, so `429`
+  responses are retried with exponential backoff.
 
 ## Getting Started
 
 ### Prerequisites
 
 - Node.js 18+ and **Bun**
-- **PostgreSQL** (local or Amazon RDS)
-- A Mistral AI API key ([console.mistral.ai](https://console.mistral.ai/))
+- **PostgreSQL** (local)
+- A **Gnani** API key ([docs.gnani.ai](https://docs.gnani.ai/))
+- A **Mistral** API key ([console.mistral.ai](https://console.mistral.ai/)) for insights
 
 ### Installation
 
@@ -59,7 +96,7 @@ cd iot-proj
 bun install
 ```
 
-Start a local PostgreSQL (or point `DATABASE_URL` at RDS):
+Start a local PostgreSQL:
 
 ```bash
 docker run -d --name lecture-pg \
@@ -84,24 +121,21 @@ bun run dev                          # http://localhost:3000
 
 ```env
 # Database
-DATABASE_URL="postgresql://user:pass@host:5432/lecturenotes?sslmode=require"
+DATABASE_URL="postgresql://lecture:lecture@localhost:5432/lecturenotes"
 
-# Mistral API key (local dev; omit on AWS to use Secrets Manager)
+# Gnani / Vachana speech-to-text
+GNANI_API_KEY=your_gnani_api_key_here
+
+# Mistral (insights only)
 MISTRAL_API_KEY=your_mistral_api_key_here
-
-# AWS (optional / deployment)
-AWS_REGION=us-west-2
-AUDIO_BUCKET=your-audio-bucket
-MISTRAL_SECRET_ARN=arn:aws:secretsmanager:...:secret:lecture-notes/mistral-api-key-xxxxxx
-SQS_QUEUE_URL=https://sqs.us-west-2.amazonaws.com/<account>/lecture-notes-processing
-PROCESS_SECRET=change-me
 ```
 
 ## End Words (transcript line breaks)
 
-By default a transcript line closes every few seconds. Professors can instead
-control line breaks with **end words** — a line ends only when one is spoken, and
-the end word is **kept** at the end of the line.
+By default a transcript line closes at each speech pause, or every 8 seconds of
+continuous speech. Professors can instead control line breaks with **end
+words** — a line ends only when one is spoken, and the end word is **kept** at
+the end of the line.
 
 1. Open **Settings** in the sidebar and add one or more words/phrases
    (e.g. `done`, `next question`). Matching is case-insensitive and whole-word.
@@ -111,39 +145,35 @@ the end word is **kept** at the end of the line.
 3. The final diarized transcript is re-grouped by the same end words, so line
    breaks and speaker labels share one source of truth.
 
-Stored in the `EndWord` table via `/api/settings/end-words`. With no end words
-configured the fallback is a periodic line break every 4 seconds.
+Stored in the `EndWord` table via `/api/settings/end-words`. With no end words,
+each Gnani transcript segment becomes its own line.
 
 ## Project Structure
 
 ```
 app/
 ├── api/
-│   ├── realtime/session/           # Mints short-lived Voxtral realtime tokens
 │   ├── settings/end-words/         # End-word configuration
-│   └── recordings/                 # CRUD, [id]/diarize, [id]/process,
-│                                   #   [id]/audio, [id]/insights, segments, speakers
+│   └── recordings/                 # CRUD, [id]/diarize, [id]/audio,
+│                                   #   [id]/insights, segments, speakers
 ├── dashboard/                      # record, transcript, insights, settings pages
 └── layout.tsx
 
+server.mjs                          # Next.js server + Gnani WebSocket proxy
 components/ui/                      # shadcn/ui components
 contexts/                           # React contexts
 hooks/useTranscription.tsx          # recording + transcription orchestration
 lib/
 ├── prisma.ts                       # Prisma client (pg adapter)
-├── mistral.ts                      # Mistral client + model config
-├── secrets.ts                      # Mistral key from env / Secrets Manager
-├── storage.ts                      # S3 audio + presigned URLs
-├── processing.ts                   # shared transcription/diarization core
+├── gnani.ts                        # Gnani batch STT + diarization client
+├── mistral.ts                      # Mistral client (insights)
+├── storage.ts                      # local audio storage + reads
+├── processing.ts                   # transcription/diarization core
 ├── endWords.ts                     # end-word splitting/grouping
 ├── audio.ts                        # WAV / PCM / base64 helpers
-├── transcription.ts                # language normalisation
-└── queue.ts                        # SQS enqueue helper
+└── transcription.ts                # language normalisation
 
-lambda/process-audio/               # SQS worker (calls /api/recordings/[id]/process)
-infra/sst.config.ts                 # reference SST (v3) infrastructure-as-code
-scripts/aws-provision.sh            # reproducible AWS CLI provisioning
-Dockerfile                          # Next.js standalone image for ECR
+Dockerfile                          # optional standalone Next.js image
 tests/                              # unit + API + browser E2E tests
 ```
 
@@ -164,31 +194,12 @@ PostgreSQL via Prisma (`prisma/schema.prisma`):
 3. **Insights** — open a recording to read its summary, key points and topics
    (a transcript can be (re)analysed with the **Generate/Regenerate** button).
 
-## AWS Deployment
-
-```
-Browser ──▶ Next.js (EC2 container) ──▶ Mistral (Voxtral realtime + transcription)
-                │  ├── Amazon RDS PostgreSQL (Prisma)
-                │  ├── Amazon S3 (audio + presigned GET)
-                │  └── AWS Secrets Manager (Mistral key, DB URL)
-                └── SQS ──▶ Lambda ──▶ POST /api/recordings/{id}/process
-```
-
-- **EC2** (t4g.small, Docker image from **ECR**, `LabInstanceProfile`) runs the app.
-- **nginx + Let's Encrypt** terminate HTTPS (microphone needs a secure context).
-- **S3** stores audio; `Recording.audioPath` points at it and playback uses a
-  presigned URL (`/api/recordings/[id]/audio`).
-- **Secrets Manager** provides the Mistral key at runtime (no key in env on AWS).
-- **SQS + Lambda** decouple processing (`/api/recordings/[id]/process`, guarded
-  by `PROCESS_SECRET`).
-
-`scripts/aws-provision.sh` provisions the stack with the AWS CLI;
-`infra/sst.config.ts` is the equivalent infrastructure-as-code for a full account.
-
 ## Testing
 
-Tests use Bun's runner and exercise the real HTTP API, database and Mistral API,
-so a reachable `DATABASE_URL` and `MISTRAL_API_KEY` are required.
+Tests use Bun's runner and exercise the real HTTP API, database, Gnani and
+Mistral APIs, so a reachable `DATABASE_URL`, `GNANI_API_KEY` and
+`MISTRAL_API_KEY` are required. The suite currently has **36 tests** (15 unit,
+20 API, 1 browser E2E).
 
 ```bash
 bun run test:unit     # fast, no network
@@ -200,7 +211,7 @@ bun test              # all of the above
 | Suite | File | Covers |
 | --- | --- | --- |
 | Unit | `tests/unit.test.ts` | audio/WAV/base64 helpers, language normalisation, Mistral client, end-word split/group |
-| API | `tests/api.test.ts` | recordings CRUD, segments/speakers, end-word config, realtime token mint, diarization, insights, realtime WebSocket |
+| API | `tests/api.test.ts` | recordings CRUD, segments/speakers, end-word config, Gnani diarization, insights, realtime WebSocket proxy |
 | E2E | `tests/e2e.test.ts` | fake-mic recording → live transcript → diarization → insights → transcript page |
 
 The E2E suite plays a speech fixture as the browser's microphone. Regenerate it

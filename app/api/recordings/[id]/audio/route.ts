@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { getAudioUrl, readLocalAudio } from "@/lib/storage";
+import { readLocalAudio } from "@/lib/storage";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
 }
 
-// GET /api/recordings/[id]/audio - Redirect to S3 (presigned) or stream locally
+// GET /api/recordings/[id]/audio - Stream the stored audio file
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params;
@@ -17,11 +17,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         { error: "Audio not available" },
         { status: 404 }
       );
-    }
-
-    const signedUrl = await getAudioUrl(recording.audioPath);
-    if (signedUrl) {
-      return NextResponse.redirect(signedUrl);
     }
 
     const bytes = await readLocalAudio(recording.audioPath);

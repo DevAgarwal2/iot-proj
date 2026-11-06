@@ -1,5 +1,5 @@
 import prisma from "@/lib/prisma";
-import { getMistralClient, MISTRAL_TRANSCRIBE_MODEL } from "@/lib/mistral";
+import { transcribeAudio } from "@/lib/gnani";
 import { normalizeLanguage } from "@/lib/transcription";
 import { groupSegmentsByEndWords } from "@/lib/endWords";
 import { uploadAudio } from "@/lib/storage";
@@ -18,8 +18,8 @@ const SPEAKER_COLORS = [
 
 /**
  * Transcribe a recording's audio with speaker diarization, persist the audio,
- * and replace the transcript with end-word grouped lines. Shared by the
- * synchronous `/diarize` route and the async `/process` (SQS + Lambda) path.
+ * and replace the transcript with end-word grouped lines. Used by the
+ * `/diarize` route.
  */
 export async function processRecordingAudio(recordingId: string, audio: Buffer) {
   const recording = await prisma.recording.findUnique({
@@ -35,7 +35,7 @@ export async function processRecordingAudio(recordingId: string, audio: Buffer) 
     data: { status: "processing" },
   });
 
-  // Persist the audio (S3 when configured, otherwise local disk).
+  // Persist the audio to local disk.
   try {
     const audioPath = await uploadAudio(recordingId, audio);
     await prisma.recording.update({
@@ -47,16 +47,9 @@ export async function processRecordingAudio(recordingId: string, audio: Buffer) 
   }
 
   try {
-    const client = await getMistralClient();
-    const response = await client.audio.transcriptions.complete({
-      model: MISTRAL_TRANSCRIBE_MODEL,
-      file: new Blob([new Uint8Array(audio)], { type: "audio/wav" }),
-      diarize: true,
-      timestampGranularities: ["segment"],
-    });
-
-    const returnedSegments = response.segments ?? [];
-    const hasTranscript = Boolean(response.text && response.text.trim().length);
+    const response = await transcribeAudio(audio);
+    const returnedSegments = response.segments;
+    const hasTranscript = Boolean(response.text.trim().length);
     const hasSegments = returnedSegments.length > 0;
 
     if (!hasTranscript && !hasSegments) {

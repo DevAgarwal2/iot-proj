@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useSyncExternalStore } from "react";
+import { useState, useSyncExternalStore, useMemo } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { Mic, FileText, BarChart3, Settings, X } from "lucide-react";
+import { Mic, FileText, BarChart3, Settings, X, ArrowUpRight } from "lucide-react";
 import { Calendar } from "@/components/ui/calendar";
 import { useTranscription } from "@/hooks/useTranscription";
 import { RecordingsProvider, useRecordingsContext } from "@/contexts/RecordingsContext";
@@ -27,10 +27,10 @@ function DashboardSidebar({ children }: { children: React.ReactNode }) {
   );
   const [calendarDate, setCalendarDate] = useState<Date | undefined>(undefined);
   const { isRecording, isConnected, isProcessing, liveTranscripts, recordingDuration } = useTranscription();
-  const { 
-    recordingsByDate, 
-    hasRecordingsOnDate, 
-    setSelectedDate, 
+  const {
+    recordingsByDate,
+    hasRecordingsOnDate,
+    setSelectedDate,
     selectedDate,
     clearDateFilter,
   } = useRecordingsContext();
@@ -55,9 +55,20 @@ function DashboardSidebar({ children }: { children: React.ReactNode }) {
   };
 
   // Get count of recordings for badge
-  const totalRecordings = recordingsByDate.dates.length > 0 
-    ? Object.values(recordingsByDate.grouped).flat().length 
+  const totalRecordings = recordingsByDate.dates.length > 0
+    ? Object.values(recordingsByDate.grouped).flat().length
     : 0;
+
+  const recentRecordings = useMemo(
+    () =>
+      Object.values(recordingsByDate.grouped)
+        .flat()
+        .sort(
+          (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+        )
+        .slice(0, 4),
+    [recordingsByDate.grouped]
+  );
 
   // Format selected date for display
   const formatSelectedDate = (date: Date) => {
@@ -77,124 +88,246 @@ function DashboardSidebar({ children }: { children: React.ReactNode }) {
     });
   };
 
+  const status = isRecording
+    ? "Recording"
+    : isProcessing
+      ? "Processing"
+      : isConnected
+        ? "Connected"
+        : "Idle";
+
   return (
-    <div className="flex h-screen bg-[#fafafa]">
-      <aside className="w-64 border-r border-[#e8e8e8] flex flex-col bg-[#fafafa]">
-        <div className="h-14 flex items-center px-5 border-b border-[#e8e8e8]">
-          <span className="text-[13px] font-medium tracking-tight text-[#999]">
-            lecture<span className="text-[#222]">/</span>notes
-          </span>
+    <div className="flex h-screen bg-cream text-ink">
+      <aside className="paper-noise flex w-[276px] shrink-0 flex-col border-r border-[#e4ddd0] bg-[#f3efe7]/90">
+        <div className="flex h-[72px] items-center gap-3 border-b border-[#e4ddd0] px-5">
+          <div className="flex h-9 w-9 items-center justify-center rounded-[11px] bg-ink text-panel shadow-[0_1px_0_rgba(29,25,21,0.1)]">
+            <span className="font-display text-[19px] leading-none">ln</span>
+          </div>
+          <div className="flex flex-col leading-none">
+            <span className="font-display text-[21px] tracking-[-0.02em]">
+              lecture<span className="text-clay">/</span>notes
+            </span>
+            <span className="mt-1 text-[9px] font-medium uppercase tracking-[0.22em] text-ink-faint">
+              AI lecture studio
+            </span>
+          </div>
         </div>
 
-        <nav className="flex-1 px-3 py-4 space-y-0.5">
-          {nav.map((item) => {
-            const active = pathname.startsWith(item.href);
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`flex items-center gap-2.5 px-3 py-2 text-[13px] rounded-sm transition-colors ${
-                  active
-                    ? "bg-[#f0f0f0] text-[#111]"
-                    : "text-[#888] hover:text-[#555] hover:bg-[#f5f5f5]"
-                }`}
-              >
-                <item.icon className="h-4 w-4" strokeWidth={1.5} />
-                {item.label}
-                {item.href === "/dashboard/record" && isRecording && (
-                  <span className="ml-auto flex items-center gap-1">
-                    <span className="h-1.5 w-1.5 rounded-full bg-[#ef4444] animate-pulse" />
-                  </span>
-                )}
-                {item.href === "/dashboard/transcript" && totalRecordings > 0 && (
-                  <span className="ml-auto text-[11px] font-mono text-[#bbb]">
-                    {totalRecordings}
-                  </span>
-                )}
-              </Link>
-            );
-          })}
+        <div className="px-4 pt-5">
+          <Link
+            href="/dashboard/record"
+            className="group flex h-10 items-center justify-between rounded-lg bg-ink px-3.5 text-[12px] font-medium text-panel transition-all hover:bg-[#2b241d] hover:shadow-lift"
+          >
+            <span className="flex items-center gap-2">
+              <Mic className="h-3.5 w-3.5" strokeWidth={1.8} />
+              New recording
+            </span>
+            <ArrowUpRight className="h-3.5 w-3.5 text-panel/50 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+          </Link>
+        </div>
+
+        <nav className="mt-6 px-3">
+          <div className="mb-2 px-3 text-[10px] font-medium uppercase tracking-[0.18em] text-ink-faint">
+            Library
+          </div>
+          <div className="space-y-1">
+            {nav.map((item) => {
+              const active = pathname.startsWith(item.href);
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`group relative flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-[13px] transition-all ${
+                    active
+                      ? "bg-panel text-ink shadow-paper ring-1 ring-line"
+                      : "text-ink-muted hover:bg-panel/55 hover:text-ink"
+                  }`}
+                >
+                  <item.icon
+                    className={`h-4 w-4 transition-colors ${
+                      active ? "text-clay" : "text-ink-faint group-hover:text-ink-muted"
+                    }`}
+                    strokeWidth={1.7}
+                  />
+                  <span className="font-medium">{item.label}</span>
+                  {item.href === "/dashboard/record" && isRecording && (
+                    <span className="ml-auto flex items-center gap-1">
+                      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-clay" />
+                    </span>
+                  )}
+                  {item.href === "/dashboard/transcript" && totalRecordings > 0 && (
+                    <span className="ml-auto rounded-full bg-cream-deep px-1.5 py-0.5 font-mono text-[10px] text-ink-muted">
+                      {totalRecordings}
+                    </span>
+                  )}
+                  {active && item.href !== "/dashboard/record" && (
+                    <span className="ml-auto h-1 w-1 rounded-full bg-clay/70" />
+                  )}
+                </Link>
+              );
+            })}
+          </div>
         </nav>
 
-        <div className="px-4 py-4 border-t border-[#e8e8e8] space-y-3">
-          {isRecording && (
+        <div className="mt-7 flex min-h-0 flex-1 flex-col px-3">
+          <div className="mb-2 flex items-center justify-between px-3">
+            <span className="text-[10px] font-medium uppercase tracking-[0.18em] text-ink-faint">
+              Recent
+            </span>
+            {recentRecordings.length > 0 && (
+              <Link
+                href="/dashboard/transcript"
+                className="text-[10px] font-medium text-ink-faint transition-colors hover:text-clay-deep"
+              >
+                All
+              </Link>
+            )}
+          </div>
+
+          <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto">
+            {recentRecordings.length > 0 ? (
+              recentRecordings.map((recording) => (
+                <Link
+                  key={recording.id}
+                  href={`/dashboard/transcript?id=${recording.id}`}
+                  className="group block rounded-lg px-3 py-2.5 transition-colors hover:bg-panel/65"
+                >
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                        recording.status === "completed"
+                          ? "bg-sage"
+                          : recording.status === "processing"
+                            ? "bg-amber-500"
+                            : recording.status === "failed"
+                              ? "bg-destructive"
+                              : "bg-ink-faint/50"
+                      }`}
+                    />
+                    <span className="truncate text-[12px] font-medium text-ink-soft transition-colors group-hover:text-ink">
+                      {recording.title}
+                    </span>
+                  </div>
+                  <div className="mt-1 flex items-center justify-between pl-3.5">
+                    <span className="text-[10px] text-ink-faint">
+                      {formatSelectedDate(new Date(recording.date))}
+                    </span>
+                    <span className="font-mono text-[9px] text-ink-faint/80">
+                      {fmt(recording.duration)}
+                    </span>
+                  </div>
+                </Link>
+              ))
+            ) : (
+              <div className="mx-1 mt-1 rounded-lg border border-dashed border-line-strong/70 bg-panel/40 px-3 py-4">
+                <p className="text-[11px] font-medium text-ink-muted">
+                  No lectures yet
+                </p>
+                <p className="mt-1 text-[10px] leading-4 text-ink-faint">
+                  Your recent recordings will sit here.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="shrink-0 space-y-3 border-t border-[#e4ddd0] px-4 py-4">
+          <div className="rounded-xl border border-line bg-panel/75 p-3.5 shadow-paper">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] uppercase tracking-widest text-[#bbb]">Rec</span>
-              <span className="text-[13px] font-mono text-[#111] tabular-nums">
-                {fmt(recordingDuration)}
+              <span className="text-[10px] font-medium uppercase tracking-[0.16em] text-ink-faint">
+                Studio
+              </span>
+              <span className="flex items-center gap-1.5 rounded-full bg-cream-deep px-2 py-0.5 text-[10px] text-ink-muted">
+                <span
+                  className={`h-1.5 w-1.5 rounded-full ${
+                    isRecording
+                      ? "bg-clay"
+                      : isProcessing
+                        ? "bg-amber-500"
+                        : isConnected
+                          ? "bg-sage"
+                          : "bg-ink-faint/60"
+                  }`}
+                />
+                {status}
               </span>
             </div>
-          )}
-          {isRecording && liveTranscripts.length > 0 && (
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] uppercase tracking-widest text-[#bbb]">Segments</span>
-              <span className="text-[13px] font-mono text-[#666] tabular-nums">
-                {liveTranscripts.length}
-              </span>
-            </div>
-          )}
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] uppercase tracking-widest text-[#bbb]">Status</span>
-            <div className="flex items-center gap-1.5">
-              <div className={`h-1.5 w-1.5 rounded-full ${
-                isRecording ? "bg-[#ef4444]" : isProcessing ? "bg-[#f97316] animate-pulse" : isConnected ? "bg-[#f97316]" : "bg-[#ddd]"
-              }`} />
-              <span className="text-[11px] text-[#999]">
-                {isRecording ? "Recording" : isProcessing ? "Processing" : isConnected ? "Connected" : "Idle"}
-              </span>
+            <div className="mt-3 flex items-end justify-between">
+              <div>
+                <div className="font-display text-[30px] leading-none tabular-nums tracking-[-0.02em]">
+                  {fmt(recordingDuration)}
+                </div>
+                <div className="mt-1 text-[10px] uppercase tracking-[0.14em] text-ink-faint">
+                  Session time
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="font-mono text-[15px] text-ink-soft tabular-nums">
+                  {liveTranscripts.length}
+                </div>
+                <div className="text-[10px] uppercase tracking-[0.12em] text-ink-faint">
+                  lines
+                </div>
+              </div>
             </div>
           </div>
-          
-          {/* Date filter indicator */}
+
           {selectedDate && (
-            <div className="flex items-center justify-between py-2 px-3 bg-[#fff7ed] border border-[#fed7aa] rounded-md">
-              <span className="text-[11px] text-[#c2410c]">
-                Showing: {formatSelectedDate(selectedDate)}
+            <div className="flex items-center justify-between rounded-lg border border-clay/20 bg-clay-soft px-3 py-2">
+              <span className="text-[11px] font-medium text-clay-deep">
+                Showing {formatSelectedDate(selectedDate)}
               </span>
-              <button 
+              <button
                 onClick={clearDateFilter}
-                className="text-[#c2410c] hover:text-[#9a3412] transition-colors"
+                className="rounded-full p-0.5 text-clay-deep/70 transition-colors hover:bg-clay/10 hover:text-clay-deep"
+                aria-label="Clear date filter"
               >
                 <X className="h-3.5 w-3.5" />
               </button>
             </div>
           )}
-          
-          <div className="pt-2 border-t border-[#e8e8e8]">
+
+          <div className="pt-1">
             {mounted ? (
               <Calendar
                 mode="single"
                 selected={calendarDate}
                 onSelect={handleDateSelect}
-                className="w-full"
+                className="w-full rounded-lg border border-line bg-panel/70 p-2 text-[12px] [--cell-size:30px]"
+                classNames={{
+                  caption_label: "font-display text-[17px] tracking-[-0.01em]",
+                  weekday: "text-[9px] font-medium uppercase tracking-[0.1em] text-ink-faint",
+                  day: "rounded-md",
+                }}
                 modifiers={{
                   hasRecording: (day) => hasRecordingsOnDate(day),
-                  isSelected: (day) => selectedDate ? day.toISOString().split("T")[0] === selectedDate.toISOString().split("T")[0] : false,
+                  isSelected: (day) =>
+                    selectedDate
+                      ? day.toISOString().split("T")[0] === selectedDate.toISOString().split("T")[0]
+                      : false,
                 }}
                 modifiersStyles={{
                   hasRecording: {
-                    fontWeight: "bold",
+                    fontWeight: "600",
                     textDecoration: "underline",
-                    textDecorationColor: "#f97316",
+                    textDecorationColor: "#c2410c",
                     textUnderlineOffset: "3px",
                   },
                 }}
               />
             ) : (
-              <div className="h-[280px] flex items-center justify-center">
-                <span className="text-[11px] text-[#ccc]">Loading calendar...</span>
+              <div className="flex h-[260px] items-center justify-center rounded-lg border border-line bg-panel/40">
+                <span className="text-[11px] text-ink-faint">Loading calendar…</span>
               </div>
             )}
-            <p className="text-[10px] text-[#bbb] mt-2 text-center">
-              Click a date to filter recordings
+            <p className="mt-2 text-center text-[10px] tracking-wide text-ink-faint">
+              Pick a date to filter the library
             </p>
           </div>
         </div>
       </aside>
 
-      <main className="flex-1 overflow-hidden">
-        {children}
-      </main>
+      <main className="flex-1 overflow-hidden">{children}</main>
     </div>
   );
 }
