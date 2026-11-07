@@ -13,7 +13,9 @@ Gnani Prisma, an open-weights 105B LLM and PostgreSQL.
 browser, real-time transcription, the speaker-labelled transcript, AI insights,
 and the spoken Class Pulse briefing (Hindi, with English captions):
 
-[docs/shots/demo-final.mp4](docs/shots/demo-final.mp4)
+![Full product walkthrough (3:14)](docs/shots/demo-final.mp4)
+
+_(If the player doesn't load above, [open the video here](docs/shots/demo-final.mp4) — it plays on GitHub with sound.)_
 
 | Record — live transcription | Transcripts — who said what |
 | --- | --- |
