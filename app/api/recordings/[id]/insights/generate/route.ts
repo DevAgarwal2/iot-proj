@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getMistralClient, MISTRAL_INSIGHTS_MODEL } from "@/lib/mistral";
+import {
+  SARVAM_CHAT_MODEL,
+  getSarvamClient,
+  openChatStream,
+} from "@/lib/sarvam";
 
 export const runtime = "nodejs";
 
@@ -15,7 +19,7 @@ Respond ONLY with valid JSON, no markdown fencing, no explanation.`;
 /**
  * POST /api/recordings/[id]/insights/generate
  *
- * Streams a Mistral-generated insight summary as plain text. The client
+ * Streams a Sarvam-generated insight summary as plain text. The client
  * accumulates the stream, parses the JSON and persists it via the regular
  * insights endpoint. Keeping this on the server means the API key never
  * reaches the browser.
@@ -32,11 +36,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const client = await getMistralClient();
-    const stream = await client.chat.stream({
-      model: MISTRAL_INSIGHTS_MODEL,
+    const client = getSarvamClient();
+    const stream = await openChatStream(client, {
+      model: SARVAM_CHAT_MODEL,
       temperature: 0.3,
-      maxTokens: 2000,
+      maxTokens: 8192,
+      reasoningEffort: "low",
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
         {
@@ -50,24 +55,8 @@ export async function POST(request: NextRequest) {
     const readable = new ReadableStream<Uint8Array>({
       async start(controller) {
         try {
-          for await (const event of stream) {
-            const content = event.data.choices?.[0]?.delta?.content;
-            const text =
-              typeof content === "string"
-                ? content
-                : Array.isArray(content)
-                  ? content
-                      .map((chunk) =>
-                        "text" in chunk && typeof chunk.text === "string"
-                          ? chunk.text
-                          : ""
-                      )
-                      .join("")
-                  : "";
-
-            if (text) {
-              controller.enqueue(encoder.encode(text));
-            }
+          for await (const text of stream) {
+            if (text) controller.enqueue(encoder.encode(text));
           }
           controller.close();
         } catch (error) {

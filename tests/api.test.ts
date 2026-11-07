@@ -50,7 +50,11 @@ async function createRecording(title = `TEST ${Date.now()}`): Promise<string> {
 
 async function postDiarize(id: string, wav: Buffer, filename = "speech.wav") {
   const form = new FormData();
-  form.append("audio", new Blob([wav], { type: "audio/wav" }), filename);
+  form.append(
+    "audio",
+    new Blob([new Uint8Array(wav)], { type: "audio/wav" }),
+    filename
+  );
   return fetch(`${base}/api/recordings/${id}/diarize`, {
     method: "POST",
     body: form,
@@ -185,7 +189,7 @@ describe("API: segments and speakers", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Diarization (live Mistral call)
+// Diarization (live Gnani call)
 // ---------------------------------------------------------------------------
 describe("API: /api/recordings/[id]/diarize", () => {
   it("requires an audio file", async () => {
@@ -248,7 +252,7 @@ describe("API: /api/recordings/[id]/diarize", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Insights (live Mistral call)
+// Insights (live Sarvam call)
 // ---------------------------------------------------------------------------
 describe("API: insights", () => {
   const transcript =

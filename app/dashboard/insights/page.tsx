@@ -538,7 +538,7 @@ function InsightsContent() {
             {selectedRecording.segments.length > 0 ? (
               <>
                 <p className="mt-2 max-w-sm text-[12px] leading-5 text-ink-faint">
-                  Ask Mistral for the summary, key points and topics hiding in this
+                  Ask Sarvam for the summary, key points and topics hiding in this
                   transcript.
                 </p>
                 <Button

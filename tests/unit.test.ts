@@ -5,7 +5,7 @@ import {
   int16ToBase64,
 } from "../lib/audio";
 import { normalizeLanguage } from "../lib/transcription";
-import { createMistralClient } from "../lib/mistral";
+import { createSarvamClient } from "../lib/sarvam";
 import {
   buildEndWordRegex,
   groupSegmentsByEndWords,
@@ -72,13 +72,13 @@ describe("normalizeLanguage", () => {
   });
 });
 
-describe("createMistralClient", () => {
+describe("createSarvamClient", () => {
   it("creates a client for a non-empty API key", () => {
-    expect(createMistralClient("test-key")).toBeDefined();
+    expect(createSarvamClient("test-key")).toBeDefined();
   });
 
   it("throws a clear error when the API key is missing", () => {
-    expect(() => createMistralClient("")).toThrow("MISTRAL_API_KEY is not set");
+    expect(() => createSarvamClient("")).toThrow("SARVAM_API_KEY is not set");
   });
 });
 

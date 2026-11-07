@@ -23,7 +23,7 @@ const instrumentSerif = Instrument_Serif({
 export const metadata: Metadata = {
   title: "Lecture Notes — Record, transcribe, remember",
   description:
-    "Live lecture transcription, speaker diarization and AI insights, powered by Gnani Prisma and Mistral.",
+    "Live lecture transcription, speaker diarization and AI insights, powered by Gnani Prisma and Sarvam 105B.",
 };
 
 export default function RootLayout({

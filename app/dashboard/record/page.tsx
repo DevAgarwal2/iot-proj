@@ -91,7 +91,7 @@ export default function RecordPage() {
       : "Say it once. Keep it forever.";
 
   const subline = isProcessing
-    ? "Labelling speakers, tightening the transcript and asking Mistral for the key ideas."
+    ? "Labelling speakers, tightening the transcript and asking Sarvam for the key ideas."
     : isRecording
       ? "Speak naturally. Pauses and your end words decide when a line closes."
       : "One take captures the live transcript, speaker labels and a clean summary.";

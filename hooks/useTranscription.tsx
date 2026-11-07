@@ -364,7 +364,7 @@ export function TranscriptionProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // Generate AI insights through the server-side Mistral route.
+  // Generate AI insights through the server-side Sarvam route.
   const generateInsights = async (recordingId: string, fullText: string) => {
     setIsGeneratingSummary(true);
     setStreamingText("");

@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useSyncExternalStore, useMemo } from "react";
+import { useState, useSyncExternalStore, useMemo, useEffect } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { Mic, FileText, BarChart3, Settings, X, ArrowUpRight } from "lucide-react";
+import { Mic, FileText, BarChart3, Activity, Settings, X, ArrowUpRight, Menu } from "lucide-react";
 import { Calendar } from "@/components/ui/calendar";
 import { useTranscription } from "@/hooks/useTranscription";
 import { RecordingsProvider, useRecordingsContext } from "@/contexts/RecordingsContext";
@@ -12,6 +12,7 @@ const nav = [
   { href: "/dashboard/record", icon: Mic, label: "Record" },
   { href: "/dashboard/transcript", icon: FileText, label: "Transcripts" },
   { href: "/dashboard/insights", icon: BarChart3, label: "Insights" },
+  { href: "/dashboard/pulse", icon: Activity, label: "Class Pulse" },
   { href: "/dashboard/settings", icon: Settings, label: "Settings" },
 ];
 
@@ -26,6 +27,18 @@ function DashboardSidebar({ children }: { children: React.ReactNode }) {
     () => false
   );
   const [calendarDate, setCalendarDate] = useState<Date | undefined>(undefined);
+  // Off-canvas sidebar on small screens.
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const closeDrawer = () => setDrawerOpen(false);
+
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setDrawerOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [drawerOpen]);
   const { isRecording, isConnected, isProcessing, liveTranscripts, recordingDuration } = useTranscription();
   const {
     recordingsByDate,
@@ -97,9 +110,43 @@ function DashboardSidebar({ children }: { children: React.ReactNode }) {
         : "Idle";
 
   return (
-    <div className="flex h-screen bg-cream text-ink">
-      <aside className="paper-noise flex w-[276px] shrink-0 flex-col border-r border-[#e4ddd0] bg-[#f3efe7]/90">
-        <div className="flex h-[72px] items-center gap-3 border-b border-[#e4ddd0] px-5">
+    <div className="flex h-dvh flex-col overflow-hidden bg-cream text-ink lg:flex-row">
+      {/* Mobile top bar */}
+      <div className="flex h-14 shrink-0 items-center justify-between border-b border-line/70 bg-[#f3efe7] px-4 lg:hidden">
+        <button
+          type="button"
+          onClick={() => setDrawerOpen(true)}
+          className="-ml-1.5 flex h-9 w-9 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-panel hover:text-ink"
+          aria-label="Open menu"
+        >
+          <Menu className="h-5 w-5" strokeWidth={1.7} />
+        </button>
+        <span className="font-display text-[20px] leading-none tracking-[-0.02em]">
+          lecture<span className="text-clay">/</span>notes
+        </span>
+        <span className="flex h-9 w-9 items-center justify-center">
+          {isRecording && (
+            <span className="h-2 w-2 animate-pulse rounded-full bg-clay" />
+          )}
+        </span>
+      </div>
+
+      {drawerOpen && (
+        <button
+          type="button"
+          aria-label="Close menu"
+          onClick={closeDrawer}
+          className="fixed inset-0 z-40 bg-ink/40 lg:hidden"
+        />
+      )}
+
+      <aside
+        className={`fixed inset-y-0 left-0 z-50 w-[276px] max-w-[85vw] border-r border-[#e4ddd0] bg-[#f3efe7] transition-transform duration-200 ease-out lg:static lg:z-auto lg:max-w-none lg:shrink-0 lg:translate-x-0 lg:bg-[#f3efe7]/90 ${
+          drawerOpen ? "translate-x-0" : "-translate-x-full"
+        }`}
+      >
+       <div className="paper-noise flex h-full min-h-0 flex-col">
+        <div className="flex h-[72px] shrink-0 items-center gap-3 border-b border-line/70 px-5">
           <div className="flex h-9 w-9 items-center justify-center rounded-[11px] bg-ink text-panel shadow-[0_1px_0_rgba(29,25,21,0.1)]">
             <span className="font-display text-[19px] leading-none">ln</span>
           </div>
@@ -111,11 +158,20 @@ function DashboardSidebar({ children }: { children: React.ReactNode }) {
               AI lecture studio
             </span>
           </div>
+          <button
+            type="button"
+            onClick={closeDrawer}
+            className="ml-auto flex h-8 w-8 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-panel hover:text-ink lg:hidden"
+            aria-label="Close menu"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
 
-        <div className="px-4 pt-5">
+        <div className="shrink-0 px-4 pt-5">
           <Link
             href="/dashboard/record"
+            onClick={closeDrawer}
             className="group flex h-10 items-center justify-between rounded-lg bg-ink px-3.5 text-[12px] font-medium text-panel transition-all hover:bg-[#2b241d] hover:shadow-lift"
           >
             <span className="flex items-center gap-2">
@@ -126,7 +182,7 @@ function DashboardSidebar({ children }: { children: React.ReactNode }) {
           </Link>
         </div>
 
-        <nav className="mt-6 px-3">
+        <nav className="mt-6 shrink-0 px-3">
           <div className="mb-2 px-3 text-[10px] font-medium uppercase tracking-[0.18em] text-ink-faint">
             Library
           </div>
@@ -137,6 +193,7 @@ function DashboardSidebar({ children }: { children: React.ReactNode }) {
                 <Link
                   key={item.href}
                   href={item.href}
+                  onClick={closeDrawer}
                   className={`group relative flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-[13px] transition-all ${
                     active
                       ? "bg-panel text-ink shadow-paper ring-1 ring-line"
@@ -169,7 +226,8 @@ function DashboardSidebar({ children }: { children: React.ReactNode }) {
           </div>
         </nav>
 
-        <div className="mt-7 flex min-h-0 flex-1 flex-col px-3">
+        <div className="mt-7 flex min-h-0 flex-1 flex-col overflow-y-auto">
+        <div className="flex flex-1 flex-col px-3">
           <div className="mb-2 flex items-center justify-between px-3">
             <span className="text-[10px] font-medium uppercase tracking-[0.18em] text-ink-faint">
               Recent
@@ -177,6 +235,7 @@ function DashboardSidebar({ children }: { children: React.ReactNode }) {
             {recentRecordings.length > 0 && (
               <Link
                 href="/dashboard/transcript"
+                onClick={closeDrawer}
                 className="text-[10px] font-medium text-ink-faint transition-colors hover:text-clay-deep"
               >
                 All
@@ -184,12 +243,13 @@ function DashboardSidebar({ children }: { children: React.ReactNode }) {
             )}
           </div>
 
-          <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto">
+          <div className="space-y-0.5 pb-3">
             {recentRecordings.length > 0 ? (
               recentRecordings.map((recording) => (
                 <Link
                   key={recording.id}
                   href={`/dashboard/transcript?id=${recording.id}`}
+                  onClick={closeDrawer}
                   className="group block rounded-lg px-3 py-2.5 transition-colors hover:bg-panel/65"
                 >
                   <div className="flex items-center gap-2">
@@ -231,7 +291,7 @@ function DashboardSidebar({ children }: { children: React.ReactNode }) {
           </div>
         </div>
 
-        <div className="shrink-0 space-y-3 border-t border-[#e4ddd0] px-4 py-4">
+        <div className="mt-auto shrink-0 space-y-3 border-t border-line/70 px-4 py-4">
           <div className="rounded-xl border border-line bg-panel/75 p-3.5 shadow-paper">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-medium uppercase tracking-[0.16em] text-ink-faint">
@@ -296,8 +356,8 @@ function DashboardSidebar({ children }: { children: React.ReactNode }) {
                 className="w-full rounded-lg border border-line bg-panel/70 p-2 text-[12px] [--cell-size:30px]"
                 classNames={{
                   caption_label: "font-display text-[17px] tracking-[-0.01em]",
-                  weekday: "text-[9px] font-medium uppercase tracking-[0.1em] text-ink-faint",
-                  day: "rounded-md",
+                  weekday: "flex-1 text-center text-[9px] font-medium uppercase tracking-[0.1em] text-ink-faint select-none",
+                  day: "flex-1 rounded-md text-center",
                 }}
                 modifiers={{
                   hasRecording: (day) => hasRecordingsOnDate(day),
@@ -325,9 +385,11 @@ function DashboardSidebar({ children }: { children: React.ReactNode }) {
             </p>
           </div>
         </div>
+        </div>
+       </div>
       </aside>
 
-      <main className="flex-1 overflow-hidden">{children}</main>
+      <main className="min-h-0 min-w-0 flex-1 overflow-hidden">{children}</main>
     </div>
   );
 }

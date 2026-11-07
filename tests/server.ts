@@ -13,7 +13,7 @@ const PORT = 3210;
  * Boots the real Next.js dev server and waits until it answers.
  * Tests then talk to the actual HTTP API - no route handlers are imported
  * directly, so the full Next request pipeline (env loading, validation,
- * Prisma, Mistral) is exercised.
+ * Prisma, Sarvam) is exercised.
  */
 export async function startServer(port: number): Promise<TestServer> {
   const child = spawn("bun", ["run", "dev"], {

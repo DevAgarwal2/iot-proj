@@ -2,9 +2,10 @@
 
 A voice transcription application for professors to record and organise lecture
 notes. It captures lecture audio in the browser, transcribes it **live** with
-Gnani (Vachana) STT, then produces a **speaker-labelled transcript** and
-AI-generated **insights** (summary, key points, topics). Built with Next.js 16,
-Gnani Prisma, Mistral and PostgreSQL.
+Gnani (Vachana) STT, then produces a **speaker-labelled transcript**,
+AI-generated **insights** (summary, key points, topics) and a **Class Pulse**
+report that shows where students likely got lost. Built with Next.js 16,
+Gnani Prisma, Sarvam 105B and PostgreSQL.
 
 ## What’s new in this build
 
@@ -16,7 +17,8 @@ Gnani Prisma, Mistral and PostgreSQL.
 - **Warm editorial UI** — paper-white canvas, stone sidebar, Instrument Serif
   display type and a burnt-orange accent, with a recent-lecture rail and a
   dedicated live-notes panel.
-- **Mistral Small** remains the insights engine only.
+- **Sarvam 105B** is the language engine for both lecture insights and the
+  Class Pulse analysis/briefing.
 
 ## Features
 
@@ -25,6 +27,8 @@ Gnani Prisma, Mistral and PostgreSQL.
 - **End words** — control transcript line breaks: a line ends only when the
   speaker says a configured word ("done", "next question", …)
 - **AI insights** — summary, key points and topics per recording
+- **Class Pulse** — a clarity score, a lecture map, likely confusion points,
+  speaking-pace analysis and a spoken, multilingual briefing
 - **Calendar + search** — organise recordings by date and title
 - **Transcript tools** — view, edit, copy and export
 - **Local-first storage** — recorded audio is written to disk, data lives in
@@ -46,22 +50,25 @@ transcript never competes with the record control.
 | Styling / UI | Tailwind CSS v4, shadcn/ui, lucide-react, framer-motion |
 | Data | Prisma ORM + `@prisma/adapter-pg` → PostgreSQL |
 | STT | Gnani Vachana — Prisma v3.0 (Realtime + Batch with diarization) |
-| Insights | Mistral Small |
+| LLM | Sarvam 105B (`sarvam-105b-conversations`, OpenAI-compatible chat completions) |
+| TTS | Gnani Timbre v3.0 (`timbre-v3.0`, one curated voice per language) |
 | Tooling | Bun, Playwright, `ws` (WebSocket proxy) |
 
 ## Models
 
-Defined in `lib/gnani.ts` and `lib/mistral.ts`.
+Defined in `lib/gnani.ts` and `lib/sarvam.ts`.
 
 | Purpose | Model |
 | --- | --- |
 | Live streaming transcription | Gnani `prisma-v3.0` (Realtime WebSocket) |
 | Batch transcription + speaker diarization | Gnani `prisma-v3.0` (Batch API) |
-| Insights / summaries | `mistral-small-latest` |
+| Insights, Class Pulse analysis and briefing | Sarvam `sarvam-105b-conversations` |
+| Class Pulse read-aloud | Gnani `timbre-v3.0` (Vasudha, Shivani, Lakshmi, Riyaa, Chetana, Tarika, Kalpana, Yashraj by language) |
 
 Both API keys are used **only on the server**. The browser talks to a same-origin
 WebSocket proxy (`/api/stt/stream`) which attaches the Gnani key, so the key is
-never exposed to the client. Mistral is called server-side for insights.
+never exposed to the client. Sarvam is called server-side for insights and Class
+Pulse.
 
 > The app runs through `server.mjs` (not plain `next dev`) because that server
 > also hosts the Gnani WebSocket proxy. `bun run dev` and `bun run start` already
@@ -86,7 +93,8 @@ never exposed to the client. Mistral is called server-side for insights.
 - Node.js 18+ and **Bun**
 - **PostgreSQL** (local)
 - A **Gnani** API key ([docs.gnani.ai](https://docs.gnani.ai/))
-- A **Mistral** API key ([console.mistral.ai](https://console.mistral.ai/)) for insights
+- A **Sarvam AI** API key ([dashboard.sarvam.ai](https://dashboard.sarvam.ai/)) for
+  insights and Class Pulse
 
 ### Installation
 
@@ -126,9 +134,16 @@ DATABASE_URL="postgresql://lecture:lecture@localhost:5432/lecturenotes"
 # Gnani / Vachana speech-to-text
 GNANI_API_KEY=your_gnani_api_key_here
 
-# Mistral (insights only)
-MISTRAL_API_KEY=your_mistral_api_key_here
+# Sarvam AI (insights + Class Pulse)
+SARVAM_API_KEY=your_sarvam_api_key_here
 ```
+
+Optional overrides: `SARVAM_MODEL` (defaults to `sarvam-105b-conversations`,
+the fast conversational 105B variant; set `sarvam-105b` for the slower flagship
+reasoning model), `SARVAM_BASE_URL` (defaults to `https://api.sarvam.ai`),
+`GNANI_TTS_MODEL` (defaults to `timbre-v3.0`) and `GNANI_TTS_VOICE` (a global
+voice override; must be a Timbre v3.0 voice). The Gnani key is shared with
+speech-to-text.
 
 ## End Words (transcript line breaks)
 
@@ -155,8 +170,8 @@ app/
 ├── api/
 │   ├── settings/end-words/         # End-word configuration
 │   └── recordings/                 # CRUD, [id]/diarize, [id]/audio,
-│                                   #   [id]/insights, segments, speakers
-├── dashboard/                      # record, transcript, insights, settings pages
+│                                   #   [id]/insights, [id]/pulse, segments, speakers
+├── dashboard/                      # record, transcript, insights, pulse, settings pages
 └── layout.tsx
 
 server.mjs                          # Next.js server + Gnani WebSocket proxy
@@ -166,7 +181,9 @@ hooks/useTranscription.tsx          # recording + transcription orchestration
 lib/
 ├── prisma.ts                       # Prisma client (pg adapter)
 ├── gnani.ts                        # Gnani batch STT + diarization client
-├── mistral.ts                      # Mistral client (insights)
+├── sarvam.ts                       # Sarvam 105B chat client (insights + Pulse)
+├── tts.ts                          # Gnani Timbre v3.0 voice per language
+├── pulse.ts                        # Class Pulse analysis engine (pace, topics, score)
 ├── storage.ts                      # local audio storage + reads
 ├── processing.ts                   # transcription/diarization core
 ├── endWords.ts                     # end-word splitting/grouping
@@ -193,12 +210,38 @@ PostgreSQL via Prisma (`prisma/schema.prisma`):
 2. **Transcripts** — browse/search recordings; the calendar filters by date.
 3. **Insights** — open a recording to read its summary, key points and topics
    (a transcript can be (re)analysed with the **Generate/Regenerate** button).
+4. **Class Pulse** — open *Class Pulse* and pick a lecture. The report builds
+   automatically: a clarity score, a topic map, likely confusion points,
+   speaking pace and the time each topic deserved. Use the **Briefing language**
+   menu to translate the written briefing, and **Listen to briefing** for a
+   short, natural spoken summary.
+
+### How Class Pulse works
+
+- Pace, pauses, time per topic and the clarity score are computed
+  deterministically from the transcript timings (`lib/pulse.ts`).
+- Sarvam is asked only for judgement calls: topic boundaries, likely confusion
+  points and plain-language coaching. Every answer is validated against the real
+  transcript before it is shown.
+- The report starts on its own; there is no "Analyse" button. Analysis, the
+  translated briefing and the text-to-speech script are separate cached requests,
+  so opening a lecture again is instant and changing language only re-runs the
+  short briefing request.
+- The spoken script is written by a dedicated TTS prompt (short sentences, no
+  lists or symbols), not read verbatim from the written briefing.
+- The script is spoken by **Gnani Timbre v3.0**, Gnani's latest TTS model. Each
+  of the ten supported languages has a curated voice, so the briefing sounds
+  native instead of using the browser's robotic system voice. Audio is warmed in
+  the background, so pressing **Listen** starts almost immediately.
+- Nothing is stored in the database; analyses, briefings, spoken scripts and
+  synthesized audio are cached in the browser keyed by transcript fingerprint
+  and language.
 
 ## Testing
 
 Tests use Bun's runner and exercise the real HTTP API, database, Gnani and
-Mistral APIs, so a reachable `DATABASE_URL`, `GNANI_API_KEY` and
-`MISTRAL_API_KEY` are required. The suite currently has **36 tests** (15 unit,
+Sarvam APIs, so a reachable `DATABASE_URL`, `GNANI_API_KEY` and
+`SARVAM_API_KEY` are required. The suite currently has **36 tests** (15 unit,
 20 API, 1 browser E2E).
 
 ```bash
@@ -210,7 +253,7 @@ bun test              # all of the above
 
 | Suite | File | Covers |
 | --- | --- | --- |
-| Unit | `tests/unit.test.ts` | audio/WAV/base64 helpers, language normalisation, Mistral client, end-word split/group |
+| Unit | `tests/unit.test.ts` | audio/WAV/base64 helpers, language normalisation, Sarvam client, end-word split/group |
 | API | `tests/api.test.ts` | recordings CRUD, segments/speakers, end-word config, Gnani diarization, insights, realtime WebSocket proxy |
 | E2E | `tests/e2e.test.ts` | fake-mic recording → live transcript → diarization → insights → transcript page |
 
