@@ -5,7 +5,23 @@ notes. It captures lecture audio in the browser, transcribes it **live** with
 Gnani (Vachana) STT, then produces a **speaker-labelled transcript**,
 AI-generated **insights** (summary, key points, topics) and a **Class Pulse**
 report that shows where students likely got lost. Built with Next.js 16,
-Gnani Prisma, Sarvam 105B and PostgreSQL.
+Gnani Prisma, an open-weights 105B LLM and PostgreSQL.
+
+## Demo
+
+**Full product walkthrough (3:14)** — a real lecture recorded live in the
+browser, real-time transcription, the speaker-labelled transcript, AI insights,
+and the spoken Class Pulse briefing (Hindi, with English captions):
+
+[docs/shots/demo-final.mp4](docs/shots/demo-final.mp4)
+
+| Record — live transcription | Transcripts — who said what |
+| --- | --- |
+| ![Recording with live notes](docs/shots/demo-live-900s.png) | ![Speaker-labelled transcript](docs/shots/demo-transcript.png) |
+
+| Insights — thirty minutes, distilled | Class Pulse — the spoken briefing |
+| --- | --- |
+| ![AI insights](docs/shots/demo-insights.png) | ![Class Pulse briefing](docs/shots/demo-pulse-hi.png) |
 
 ## What’s new in this build
 
@@ -17,8 +33,8 @@ Gnani Prisma, Sarvam 105B and PostgreSQL.
 - **Warm editorial UI** — paper-white canvas, stone sidebar, Instrument Serif
   display type and a burnt-orange accent, with a recent-lecture rail and a
   dedicated live-notes panel.
-- **Sarvam 105B** is the language engine for both lecture insights and the
-  Class Pulse analysis/briefing.
+- **An open-weights 105B LLM** is the language engine for both lecture
+  insights and the Class Pulse analysis/briefing.
 
 ## Features
 
@@ -50,7 +66,7 @@ transcript never competes with the record control.
 | Styling / UI | Tailwind CSS v4, shadcn/ui, lucide-react, framer-motion |
 | Data | Prisma ORM + `@prisma/adapter-pg` → PostgreSQL |
 | STT | Gnani Vachana — Prisma v3.0 (Realtime + Batch with diarization) |
-| LLM | Sarvam 105B (`sarvam-105b-conversations`, OpenAI-compatible chat completions) |
+| LLM | Open-weights 105B conversational model (OpenAI-compatible chat completions) |
 | TTS | Gnani Timbre v3.0 (`timbre-v3.0`, one curated voice per language) |
 | Tooling | Bun, Playwright, `ws` (WebSocket proxy) |
 
@@ -62,12 +78,12 @@ Defined in `lib/gnani.ts` and `lib/sarvam.ts`.
 | --- | --- |
 | Live streaming transcription | Gnani `prisma-v3.0` (Realtime WebSocket) |
 | Batch transcription + speaker diarization | Gnani `prisma-v3.0` (Batch API) |
-| Insights, Class Pulse analysis and briefing | Sarvam `sarvam-105b-conversations` |
+| Insights, Class Pulse analysis and briefing | Open-weights 105B conversational model |
 | Class Pulse read-aloud | Gnani `timbre-v3.0` (Vasudha, Shivani, Lakshmi, Riyaa, Chetana, Tarika, Kalpana, Yashraj by language) |
 
 Both API keys are used **only on the server**. The browser talks to a same-origin
 WebSocket proxy (`/api/stt/stream`) which attaches the Gnani key, so the key is
-never exposed to the client. Sarvam is called server-side for insights and Class
+never exposed to the client. The LLM is called server-side for insights and Class
 Pulse.
 
 > The app runs through `server.mjs` (not plain `next dev`) because that server
@@ -93,8 +109,8 @@ Pulse.
 - Node.js 18+ and **Bun**
 - **PostgreSQL** (local)
 - A **Gnani** API key ([docs.gnani.ai](https://docs.gnani.ai/))
-- A **Sarvam AI** API key ([dashboard.sarvam.ai](https://dashboard.sarvam.ai/)) for
-  insights and Class Pulse
+- An **LLM API key** for insights and Class Pulse (any OpenAI-compatible
+  provider — see `SARVAM_BASE_URL` below)
 
 ### Installation
 
@@ -134,13 +150,13 @@ DATABASE_URL="postgresql://lecture:lecture@localhost:5432/lecturenotes"
 # Gnani / Vachana speech-to-text
 GNANI_API_KEY=your_gnani_api_key_here
 
-# Sarvam AI (insights + Class Pulse)
-SARVAM_API_KEY=your_sarvam_api_key_here
+# LLM (insights + Class Pulse)
+SARVAM_API_KEY=your_llm_api_key_here
 ```
 
-Optional overrides: `SARVAM_MODEL` (defaults to `sarvam-105b-conversations`,
-the fast conversational 105B variant; set `sarvam-105b` for the slower flagship
-reasoning model), `SARVAM_BASE_URL` (defaults to `https://api.sarvam.ai`),
+Optional overrides: `SARVAM_MODEL` (the chat model id — defaults to the fast
+conversational 105B open-weights variant) and `SARVAM_BASE_URL` (your
+provider's OpenAI-compatible endpoint),
 `GNANI_TTS_MODEL` (defaults to `timbre-v3.0`) and `GNANI_TTS_VOICE` (a global
 voice override; must be a Timbre v3.0 voice). The Gnani key is shared with
 speech-to-text.
@@ -181,7 +197,7 @@ hooks/useTranscription.tsx          # recording + transcription orchestration
 lib/
 ├── prisma.ts                       # Prisma client (pg adapter)
 ├── gnani.ts                        # Gnani batch STT + diarization client
-├── sarvam.ts                       # Sarvam 105B chat client (insights + Pulse)
+├── sarvam.ts                       # LLM chat client — insights + Class Pulse
 ├── tts.ts                          # Gnani Timbre v3.0 voice per language
 ├── pulse.ts                        # Class Pulse analysis engine (pace, topics, score)
 ├── storage.ts                      # local audio storage + reads
@@ -220,7 +236,7 @@ PostgreSQL via Prisma (`prisma/schema.prisma`):
 
 - Pace, pauses, time per topic and the clarity score are computed
   deterministically from the transcript timings (`lib/pulse.ts`).
-- Sarvam is asked only for judgement calls: topic boundaries, likely confusion
+- The LLM is asked only for judgement calls: topic boundaries, likely confusion
   points and plain-language coaching. Every answer is validated against the real
   transcript before it is shown.
 - The report starts on its own; there is no "Analyse" button. Analysis, the
@@ -240,7 +256,7 @@ PostgreSQL via Prisma (`prisma/schema.prisma`):
 ## Testing
 
 Tests use Bun's runner and exercise the real HTTP API, database, Gnani and
-Sarvam APIs, so a reachable `DATABASE_URL`, `GNANI_API_KEY` and
+the LLM APIs, so a reachable `DATABASE_URL`, `GNANI_API_KEY` and
 `SARVAM_API_KEY` are required. The suite currently has **36 tests** (15 unit,
 20 API, 1 browser E2E).
 
@@ -253,7 +269,7 @@ bun test              # all of the above
 
 | Suite | File | Covers |
 | --- | --- | --- |
-| Unit | `tests/unit.test.ts` | audio/WAV/base64 helpers, language normalisation, Sarvam client, end-word split/group |
+| Unit | `tests/unit.test.ts` | audio/WAV/base64 helpers, language normalisation, LLM client, end-word split/group |
 | API | `tests/api.test.ts` | recordings CRUD, segments/speakers, end-word config, Gnani diarization, insights, realtime WebSocket proxy |
 | E2E | `tests/e2e.test.ts` | fake-mic recording → live transcript → diarization → insights → transcript page |
 
