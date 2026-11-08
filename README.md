@@ -7,6 +7,8 @@ AI-generated **insights** (summary, key points, topics) and a **Class Pulse**
 report that shows where students likely got lost. Built with Next.js 16,
 Gnani Prisma, an open-weights 105B LLM and PostgreSQL.
 
+> 📄 **One-page solution pitch:** [docs/PITCH.md](docs/PITCH.md) — problem, solution and how it works on a single page. Demo video and screenshots below.
+
 ## Demo
 
 **Full product walkthrough (3:14)** — a real lecture recorded live in the
